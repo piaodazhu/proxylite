@@ -17,12 +17,15 @@ const (
 	TypeRegisterServiceRsp
 )
 
+// AskFreePortReq Ask avaliable free ports request 
 type AskFreePortReq struct{}
 
+// AskFreePortRsp Ask avaliable free ports response 
 type AskFreePortRsp struct {
 	Ports []int
 }
 
+// RegisterInfo Register information
 type RegisterInfo struct {
 	OuterPort int
 	InnerAddr string
@@ -30,6 +33,7 @@ type RegisterInfo struct {
 	Message   string
 }
 
+// RegisterServiceReq inner service registration request
 type RegisterServiceReq struct {
 	Info RegisterInfo
 }
@@ -41,14 +45,17 @@ const (
 	RegisterRspServerError
 )
 
+// RegisterServiceRsp inner service registration response
 type RegisterServiceRsp struct {
 	Code int
 }
 
+// AskServiceReq Service discovery request
 type AskServiceReq struct {
 	Prefix string
 }
 
+// ServiceInfo Service basic information
 type ServiceInfo struct {
 	Port    int
 	Name    string
@@ -57,6 +64,7 @@ type ServiceInfo struct {
 	Birth   time.Time
 }
 
+// AskServiceRsp Service discovery response
 type AskServiceRsp struct {
 	Services []ServiceInfo
 }

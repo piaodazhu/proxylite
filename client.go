@@ -23,6 +23,7 @@ type RegisterEntry struct {
 	Done   <-chan struct{}
 }
 
+// ProxyLiteClient inner client that forwards traffic between inner service and proxy server server.
 type ProxyLiteClient struct {
 	ready          bool
 	serverAddr     string

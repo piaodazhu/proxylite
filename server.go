@@ -1,3 +1,6 @@
+/*
+Package proxylite is a dynamic reverse proxy package for Go.
+*/
 package proxylite
 
 import (
@@ -20,6 +23,7 @@ type tunnel struct {
 	info      *RegisterInfo
 }
 
+// ProxyLiteServer Public server that forwards traffic between user and inner client.
 type ProxyLiteServer struct {
 	all    map[int]struct{}
 	lock   sync.RWMutex
