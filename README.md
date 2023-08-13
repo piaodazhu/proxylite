@@ -38,9 +38,9 @@ package main
 import "github.com/piaodazhu/proxylite"
 
 func main() {
-	server := proxylite.NewProxyLiteServer()
-	server.AddPort(9930, 9932)
-	panic(server.Run(":9933"))
+    server := proxylite.NewProxyLiteServer()
+    server.AddPort(9930, 9932)
+    panic(server.Run(":9933"))
 }
 ```
 
@@ -51,32 +51,32 @@ Then, we create a inner client:
 package main
 
 import (
-	"log"
+    "log"
 
-	"github.com/piaodazhu/proxylite"
+    "github.com/piaodazhu/proxylite"
 )
 
 func main() {
-	client := proxylite.NewProxyLiteClient("0.0.0.0:9933")
-	err := client.RegisterInnerService(
-		proxylite.RegisterInfo{
-			OuterPort: 9931,
-			InnerAddr: ":22",
-			Name:      "ssh",
-			Message:   "ssh login",
-		},
-	)
+    client := proxylite.NewProxyLiteClient("0.0.0.0:9933")
+    err := client.RegisterInnerService(
+        proxylite.RegisterInfo{
+            OuterPort: 9931,
+            InnerAddr: ":22",
+            Name:      "ssh",
+            Message:   "ssh login",
+        },
+    )
     if err != nil {
         log.Fatal(err)
         return
     }
 
-	entry, ok := client.GetRegisterEntryByName("ssh")
-	if !ok {
+    entry, ok := client.GetRegisterEntryByName("ssh")
+    if !ok {
         log.Fatal("registration failed")
-		return
-	}
-	<-entry.Done
+        return
+    }
+    <-entry.Done
     log.Print("BYE :)")
 }
 ```
@@ -134,11 +134,11 @@ Get a random avaliable port from proxy server.
 
 ```golang
 type ServiceInfo struct {
-	Port    int
-	Name    string
-	Message string
-	Busy    bool
-	Birth   time.Time
+    Port    int
+    Name    string
+    Message string
+    Busy    bool
+    Birth   time.Time
 }
 
 func (c *ProxyLiteClient) ActiveServices() ([]ServiceInfo, error)
@@ -148,10 +148,10 @@ Discover all active services from proxy server.
 
 ```golang
 type RegisterInfo struct {
-	OuterPort int
-	InnerAddr string
-	Name      string
-	Message   string
+    OuterPort int
+    InnerAddr string
+    Name      string
+    Message   string
 }
 
 func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error
@@ -160,12 +160,12 @@ Register inner server to proxy server's outer port.
 
 ```golang
 type RegisterEntry struct {
-	// Basic Info
-	Info   RegisterInfo
-	// Cancel function
-	Cancel func()
-	// Done channel
-	Done   <-chan struct{}
+    // Basic Info
+    Info   RegisterInfo
+    // Cancel function
+    Cancel func()
+    // Done channel
+    Done   <-chan struct{}
 }
 
 func (c *ProxyLiteClient) GetRegisterEntryByName(name string) (*RegisterEntry, bool) 

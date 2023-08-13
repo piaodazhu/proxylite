@@ -41,9 +41,9 @@ package main
 import "github.com/piaodazhu/proxylite"
 
 func main() {
-	server := proxylite.NewProxyLiteServer()
-	server.AddPort(9930, 9932)
-	panic(server.Run(":9933"))
+    server := proxylite.NewProxyLiteServer()
+    server.AddPort(9930, 9932)
+    panic(server.Run(":9933"))
 }
 ```
 
@@ -54,32 +54,32 @@ func main() {
 package main
 
 import (
-	"log"
+    "log"
 
-	"github.com/piaodazhu/proxylite"
+    "github.com/piaodazhu/proxylite"
 )
 
 func main() {
-	client := proxylite.NewProxyLiteClient("0.0.0.0:9933")
-	err := client.RegisterInnerService(
-		proxylite.RegisterInfo{
-			OuterPort: 9931,
-			InnerAddr: ":22",
-			Name:      "ssh",
-			Message:   "ssh 登录",
-		},
-	)
+    client := proxylite.NewProxyLiteClient("0.0.0.0:9933")
+    err := client.RegisterInnerService(
+        proxylite.RegisterInfo{
+            OuterPort: 9931,
+            InnerAddr: ":22",
+            Name:      "ssh",
+            Message:   "ssh 登录",
+        },
+    )
     if err != nil {
         log.Fatal(err)
         return
     }
 
-	entry, ok := client.GetRegisterEntryByName("ssh")
-	if !ok {
+    entry, ok := client.GetRegisterEntryByName("ssh")
+    if !ok {
         log.Fatal("注册失败")
-		return
-	}
-	<-entry.Done
+        return
+    }
+    <-entry.Done
     log.Print("再见 :)")
 }
 ```
@@ -137,11 +137,11 @@ func (c *ProxyLiteClient) AnyPort() (int, bool)
 
 ```golang
 type ServiceInfo struct {
-	Port    int
-	Name    string
-	Message string
-	Busy    bool
-	Birth   time.Time
+    Port    int
+    Name    string
+    Message string
+    Busy    bool
+    Birth   time.Time
 }
 
 func (c *ProxyLiteClient) ActiveServices() ([]ServiceInfo, error)
@@ -150,10 +150,10 @@ func (c *ProxyLiteClient) ActiveServices() ([]ServiceInfo, error)
 
 ```golang
 type RegisterInfo struct {
-	OuterPort int
-	InnerAddr string
-	Name      string
-	Message   string
+    OuterPort int
+    InnerAddr string
+    Name      string
+    Message   string
 }
 
 func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error
@@ -164,12 +164,12 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error
 
 ```golang
 type RegisterEntry struct {
-	// 基本信息
-	Info   RegisterInfo
-	// 取消函数
-	Cancel func()
-	// 完成通道
-	Done   <-chan struct{}
+    // 基本信息
+    Info   RegisterInfo
+    // 取消函数
+    Cancel func()
+    // 完成通道
+    Done   <-chan struct{}
 }
 
 func (c *ProxyLiteClient) GetRegisterEntryByName(name string) (*RegisterEntry, bool) 
