@@ -13,9 +13,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// RegisterEntry entry to discribe a single service registration
 type RegisterEntry struct {
+	// Basic Info
 	Info   RegisterInfo
+	// Cancel function
 	Cancel func()
+	// Done channel
 	Done   <-chan struct{}
 }
 
@@ -28,6 +32,7 @@ type ProxyLiteClient struct {
 	logger         *log.Logger
 }
 
+// NewProxyLiteClient Create a inner client binding with a proxy server.
 func NewProxyLiteClient(serverAddr string) *ProxyLiteClient {
 	client := &ProxyLiteClient{
 		ready:          false,
@@ -49,6 +54,7 @@ func NewProxyLiteClient(serverAddr string) *ProxyLiteClient {
 	return client
 }
 
+// AvaliablePorts Get avaliable ports from proxy server.
 func (c *ProxyLiteClient) AvaliablePorts() ([]int, bool) {
 	ports, err := AskFreePort(c.serverAddr)
 	if err != nil {
@@ -62,6 +68,7 @@ func (c *ProxyLiteClient) AvaliablePorts() ([]int, bool) {
 	return ports, true
 }
 
+// AnyPort Get a random avaliable port from proxy server.
 func (c *ProxyLiteClient) AnyPort() (int, bool) {
 	if c.ready {
 		for port := range c.avaliablePorts {
@@ -81,6 +88,7 @@ func (c *ProxyLiteClient) AnyPort() (int, bool) {
 	return 0, false
 }
 
+// ActiveServices Discover all active services from proxy server.
 func (c *ProxyLiteClient) ActiveServices() ([]ServiceInfo, error) {
 	return DiscoverServices(c.serverAddr)
 }
@@ -118,6 +126,12 @@ func register(conn net.Conn, info RegisterInfo) error {
 	return nil
 }
 
+// SetLogger Set customized logrus logger for the inner client. 
+func (c *ProxyLiteClient) SetLogger(logger *log.Logger) {
+	c.logger = logger
+}
+
+// RegisterInnerService Register inner server to proxy server's outer port.
 func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	if !c.ready {
 		return errors.New("client not ready")
@@ -214,6 +228,7 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	return nil
 }
 
+// GetRegisterEntryByName Get RegisterEntry
 func (c *ProxyLiteClient) GetRegisterEntryByName(name string) (*RegisterEntry, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -225,6 +240,7 @@ func (c *ProxyLiteClient) GetRegisterEntryByName(name string) (*RegisterEntry, b
 	return nil, false
 }
 
+// GetRegisterEntryByPort Get RegisterEntry
 func (c *ProxyLiteClient) GetRegisterEntryByPort(port int) (*RegisterEntry, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -232,6 +248,11 @@ func (c *ProxyLiteClient) GetRegisterEntryByPort(port int) (*RegisterEntry, bool
 	return entry, exists
 }
 
+func (c *ProxyLiteClient) logTunnelMessage(service, header, msg string) {
+	c.logger.Infof("[%s] [%s] %s", service, header, msg)
+}
+
+// AskFreePort Ask avaliable free port from proxy server with given address.
 func AskFreePort(addr string) ([]int, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -263,6 +284,7 @@ func AskFreePort(addr string) ([]int, error) {
 	return rsp.Ports, nil
 }
 
+// DiscoverServices Discover all active services from proxy server with given address.
 func DiscoverServices(addr string) ([]ServiceInfo, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -293,10 +315,3 @@ func DiscoverServices(addr string) ([]ServiceInfo, error) {
 	return rsp.Services, nil
 }
 
-func (c *ProxyLiteClient) SetLogger(logger *log.Logger) {
-	c.logger = logger
-}
-
-func (c *ProxyLiteClient) logTunnelMessage(service, header, msg string) {
-	c.logger.Infof("[%s] [%s] %s", service, header, msg)
-}

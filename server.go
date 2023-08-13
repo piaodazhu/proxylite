@@ -27,6 +27,7 @@ type ProxyLiteServer struct {
 	logger *log.Logger
 }
 
+// NewProxyLiteServer Create a Proxy server with avaliable ports intervals.
 func NewProxyLiteServer(portIntervals ...[2]int) *ProxyLiteServer {
 	server := &ProxyLiteServer{
 		all:    map[int]struct{}{},
@@ -40,6 +41,7 @@ func NewProxyLiteServer(portIntervals ...[2]int) *ProxyLiteServer {
 	return server
 }
 
+// AddPort Add avaliable ports intervals for server. Return false if port is invalid.
 func (s *ProxyLiteServer) AddPort(from, to int) bool {
 	if from <= 0 || to > 65535 {
 		return false
@@ -50,6 +52,13 @@ func (s *ProxyLiteServer) AddPort(from, to int) bool {
 	return true
 }
 
+// SetLogger Set customized logrus logger for the server. 
+func (s *ProxyLiteServer) SetLogger(logger *log.Logger) {
+	s.logger = logger
+}
+
+
+// Run Run the server and let it listen on given address. 
 func (s *ProxyLiteServer) Run(addr string) error {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -368,10 +377,6 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 
 	// Drain out the sending buffer. The Tunnel can be destroy now.
 	time.Sleep(time.Millisecond * 10)
-}
-
-func (s *ProxyLiteServer) SetLogger(logger *log.Logger) {
-	s.logger = logger
 }
 
 func (s *ProxyLiteServer) logProtocolMessage(source, header string, req, rsp interface{}) {
