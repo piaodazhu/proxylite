@@ -1,10 +1,8 @@
 module server
 
-go 1.20
+go 1.12
 
-require github.com/piaodazhu/proxylite v0.0.0-20230813091435-b2c8f474a9fc
+// require github.com/piaodazhu/proxylite v0.0.0-20230813091435-b2c8f474a9fc
+replace github.com/piaodazhu/proxylite => ../../
 
-require (
-	github.com/sirupsen/logrus v1.9.3 // indirect
-	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
-)
+require github.com/piaodazhu/proxylite v0.0.0-00010101000000-000000000000
