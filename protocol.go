@@ -74,6 +74,21 @@ type AskServiceRsp struct {
 	Services []ServiceInfo
 }
 
+func writeUidUnsafe(buf []byte, uid uint32) {
+	binary.LittleEndian.PutUint32(buf, uid)
+}
+
+func writeUidWithCloseUnsafe(buf []byte, uid uint32) {
+	binary.LittleEndian.PutUint32(buf, uid)
+	binary.LittleEndian.PutUint32(buf[4:], 886)
+}
+
+func readUidUnsafe(buf []byte) (uint32, bool) {
+	uid := binary.LittleEndian.Uint32(buf)
+	close := binary.LittleEndian.Uint32(buf)
+	return uid, close == 0
+}
+
 func sendMessage(conn net.Conn, mtype int, raw []byte) error {
 	Len := len(raw)
 	Buf := make([]byte, Len+8)
@@ -123,7 +138,7 @@ func recvMessage(conn net.Conn) (int, []byte, error) {
 }
 
 func sendMessageOnBuffer(conn net.Conn, mtype int, buffer []byte, dlen int) error {
-	if len(buffer) < dlen + 8 {
+	if len(buffer) < dlen+8 {
 		return errors.New("send buffer too small")
 	}
 

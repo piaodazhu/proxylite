@@ -243,7 +243,6 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 	binder := newConnUidBinder(2)
 	var totalOut, totalIn uint64
 
-	
 	// Now, register is OK, we want to map outer port to the inner client's socket
 	s.logTunnelMessage(tn.info.Name, "REGISTER", fmt.Sprintf("New inner client register port %d ok. Listening for outer client...", tn.info.OuterPort))
 
@@ -253,7 +252,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		(*tn.innerConn).Close()
 		return
 	}
-	
+
 	// close both "proxy server <-> inner client" and "outer port listener" and all user connection
 	closeTunnel := func() {
 		(*tn.innerConn).Close()
@@ -272,7 +271,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		fmt.Println("set empty ", tn.empty)
 		fmt.Println(s.used[tn.info.OuterPort])
 	}()
-	
+
 	// read from tunnel and send to correct user
 	go func() {
 		buf := make([]byte, 4096)
@@ -280,7 +279,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		var data []byte
 		var err error
 		var outerConn *net.Conn
-		var ok bool
+		var ok, alive bool
 		var uid uint32
 		for {
 			// read from inner client
@@ -290,16 +289,19 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 			}
 
 			// get multiplex uid
-			uid = readUidUnsafe(data)
+			uid, alive = readUidUnsafe(data)
 			if outerConn, ok = binder.getConn(uid); !ok {
 				// unexpected uid, drop the pack
 				// TODO send a close signal
 				continue
+			} else if !alive {
+				if binder.freeUidIfExists(GenConnId(outerConn)) {
+					(*outerConn).Close()
+				}
 			}
-
 			// forward to the write user. (don't send 4 byte uid)
 			// here can be optimized by goroutines
-			n, err = (*outerConn).Write(data[4:])
+			n, err = (*outerConn).Write(data[8:])
 			if err != nil {
 				// how to send close thougth tunnel?
 				// TODO send a close signal
@@ -317,16 +319,19 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		buf := make([]byte, 4096)
 		var n int
 		var err error
+		var userEnd bool = false
 
-		for {
-			n, err = outerConn.Read(buf[12:]) // type(4) + length(4) + uid(4)
+		for !userEnd {
+			n, err = outerConn.Read(buf[16:]) // type(4) + length(4) + uid(4) + close(4)
 			if err != nil {
 				// end this link
-				break
+				writeUidWithCloseUnsafe(buf[8:], uid)
+				userEnd = true
+			} else {
+				writeUidUnsafe(buf[8:], uid)
 			}
 
-			writeUidUnsafe(buf[8:], uid)
-			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+4) // + uid(4)
+			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+8) // + uid(4)
 			if err != nil {
 				// end this tunnel
 				doOnce.Do(closeTunnel)
@@ -354,7 +359,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		}
 	}
 	doOnce.Do(closeTunnel)
-	
+
 	// Drain out the sending buffer. The Tunnel can be destroy now.
 	time.Sleep(time.Millisecond * 10)
 }

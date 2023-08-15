@@ -140,7 +140,7 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	if _, exists := c.registered[info.OuterPort]; exists {
 		return errors.New("ports is occupied")
 	}
-	
+
 	serverConn, err := net.Dial("tcp", c.serverAddr)
 	if err != nil {
 		c.ready = false
@@ -182,15 +182,28 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	readFromService := func(inner net.Conn, uid uint32) {
 		buf := make([]byte, 4096)
 		var n int
-		for {
-			n, err = inner.Read(buf[12:]) // type(4) + length(4) + uid(4)
-			if err != nil {
-				break
+		var err error
+		var serviceEnd bool = false
+		for !serviceEnd {
+			if inner == nil {
+				// no inner service. send user close
+				c.logTunnelMessage(info.Name, "NOSRV", fmt.Sprintf("service not avaliable, uid[%d] [%v]", uid, err))
+				n = 0
+				writeUidWithCloseUnsafe(buf[8:], uid)
+				serviceEnd = true
+			} else {
+				// has inner serivce. read from service
+				n, err = inner.Read(buf[16:]) // type(4) + length(4) + uid(4) + close(4)
+				if err != nil {
+					// read this service failed. send user close
+					writeUidWithCloseUnsafe(buf[8:], uid)
+					serviceEnd = true
+				} else {
+					writeUidUnsafe(buf[8:], uid)
+				}
 			}
 
-			writeUidUnsafe(buf[8:], uid)
-
-			err = sendMessageOnBuffer(serverConn, TypeDataSegment, buf, n+4) // + uid(4)
+			err = sendMessageOnBuffer(serverConn, TypeDataSegment, buf, n+8) // uid(4) + close(4)
 			if err != nil {
 				break
 			}
@@ -209,7 +222,7 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 		var data []byte
 		var uid uint32
 		var innerConn *net.Conn
-		var ok bool
+		var ok, alive bool
 		var err error
 		for {
 			mtype, data, err = recvMessageWithBuffer(serverConn, buf)
@@ -217,13 +230,13 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 				break
 			}
 
-			uid = readUidUnsafe(data)
+			uid, alive = readUidUnsafe(data)
 			if innerConn, ok = binder.getConn(uid); !ok {
+				// Blocking. can be optimized.
 				*innerConn, err = net.Dial("tcp", info.InnerAddr)
 				if err != nil {
-					// break
-					// should lead it to a black hole? Or close signal!
-
+					// should close this client. leave it to below process.
+					readFromService(nil, uid)
 					continue
 				}
 				if !binder.allocConn(uid, GenConnId(innerConn), innerConn) {
@@ -231,9 +244,14 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 					break
 				}
 				go readFromService(*innerConn, uid)
+			} else if !alive {
+				if binder.freeConnIfExists(uid) {
+					(*innerConn).Close()
+					c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("one user finish, uid[%d] [%v]", uid, err))
+				}
 			}
 
-			n, err = (*innerConn).Write(data[4:])
+			n, err = (*innerConn).Write(data[8:])
 			if err != nil {
 				if binder.freeConnIfExists(uid) {
 					(*innerConn).Close()

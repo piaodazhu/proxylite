@@ -1,7 +1,6 @@
 package proxylite
 
 import (
-	"encoding/binary"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -9,7 +8,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/google/uuid"
 )
-
 
 func GenConnId(conn *net.Conn) uint64 {
 	var tuple [256]byte
@@ -33,14 +31,6 @@ func GenConnId(conn *net.Conn) uint64 {
 	}
 
 	return xxhash.Sum64(tuple[:idx])
-}
-
-func writeUidUnsafe(buf []byte, uid uint32) {
-	binary.LittleEndian.PutUint32(buf, uid)
-}
-
-func readUidUnsafe(buf []byte) uint32 {
-	return binary.LittleEndian.Uint32(buf)
 }
 
 // conn can be hash to uid, uid can map to conn
