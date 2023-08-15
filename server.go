@@ -274,7 +274,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 
 	// read from tunnel and send to correct user
 	go func() {
-		buf := make([]byte, 4096)
+		buf := make([]byte, 32768)
 		var mtype, n int
 		var data []byte
 		var err error
@@ -287,7 +287,6 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 			if err != nil || mtype != TypeDataSegment {
 				break
 			}
-
 			// get multiplex uid
 			uid, alive = readUidUnsafe(data)
 			if outerConn, ok = binder.getConn(uid); !ok {
@@ -299,6 +298,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 					(*outerConn).Close()
 				}
 			}
+
 			// forward to the write user. (don't send 4 byte uid)
 			// here can be optimized by goroutines
 			n, err = (*outerConn).Write(data[8:])
@@ -316,7 +316,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 
 	// read from user and send to tunnel
 	readFromUser := func(outerConn net.Conn, outerConnId uint64, uid uint32) {
-		buf := make([]byte, 4096)
+		buf := make([]byte, 32768)
 		var n int
 		var err error
 		var userEnd bool = false
@@ -324,6 +324,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		for !userEnd {
 			n, err = outerConn.Read(buf[16:]) // type(4) + length(4) + uid(4) + close(4)
 			if err != nil {
+				log.Error(err)
 				// end this link
 				writeUidWithCloseUnsafe(buf[8:], uid)
 				userEnd = true
@@ -331,13 +332,12 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 				writeUidUnsafe(buf[8:], uid)
 			}
 
-			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+8) // + uid(4)
+			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+8) // + uid(4) + close(4)
 			if err != nil {
 				// end this tunnel
 				doOnce.Do(closeTunnel)
 				break
 			}
-			totalIn += uint64(n)
 		}
 		if binder.freeUidIfExists(GenConnId(&outerConn)) {
 			outerConn.Close()

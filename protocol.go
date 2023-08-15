@@ -85,7 +85,7 @@ func writeUidWithCloseUnsafe(buf []byte, uid uint32) {
 
 func readUidUnsafe(buf []byte) (uint32, bool) {
 	uid := binary.LittleEndian.Uint32(buf)
-	close := binary.LittleEndian.Uint32(buf)
+	close := binary.LittleEndian.Uint32(buf[4:])
 	return uid, close == 0
 }
 
@@ -147,7 +147,7 @@ func sendMessageOnBuffer(conn net.Conn, mtype int, buffer []byte, dlen int) erro
 
 	Offset := 0
 	for Offset < dlen+8 {
-		n, err := conn.Write(buffer[Offset:])
+		n, err := conn.Write(buffer[Offset : dlen+8])
 		if err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ func recvMessageWithBuffer(conn net.Conn, buffer []byte) (int, []byte, error) {
 
 	Offset := 0
 	for Offset < 8 {
-		n, err := conn.Read(buffer[Offset:])
+		n, err := conn.Read(buffer[Offset:8])
 		if err != nil {
 			return 0, nil, err
 		}
@@ -174,7 +174,6 @@ func recvMessageWithBuffer(conn net.Conn, buffer []byte) (int, []byte, error) {
 
 	mtype := int(binary.LittleEndian.Uint32(buffer[0:]))
 	Len = int(binary.LittleEndian.Uint32(buffer[4:]))
-
 	if len(buffer) < Len+8 {
 		logrus.Warnf("the given recv buffer length is %d while segment requires %d", len(buffer), Len+8)
 		buffer = make([]byte, Len)
@@ -184,12 +183,11 @@ func recvMessageWithBuffer(conn net.Conn, buffer []byte) (int, []byte, error) {
 
 	Offset = 0
 	for Offset < Len {
-		n, err := conn.Read(buffer[Offset:])
+		n, err := conn.Read(buffer[Offset:Len])
 		if err != nil {
 			return 0, nil, err
 		}
-
 		Offset += n
 	}
-	return mtype, buffer, nil
+	return mtype, buffer[:Len], nil
 }

@@ -18,17 +18,17 @@ func main() {
 	log.Print(client.RegisterInnerService(
 		proxylite.RegisterInfo{
 			OuterPort: 9931,
-			InnerAddr: ":22",
-			Name:      "ssh",
-			Message:   "ssh login",
+			InnerAddr: "127.0.0.1:6379",
+			Name:      "redis",
+			Message:   "redis kv",
 		},
 	))
 
 	log.Print(client.AvaliablePorts())
 	log.Print(client.ActiveServices())
 	log.Print(client.GetRegisterEntryByPort(9931))
-	log.Print(client.GetRegisterEntryByName("ssh"))
-	entry, ok := client.GetRegisterEntryByName("ssh")
+	log.Print(client.GetRegisterEntryByName("redis"))
+	entry, ok := client.GetRegisterEntryByName("redis")
 
 	if !ok {
 		log.Fatal("register failed")
@@ -39,7 +39,7 @@ func main() {
 	log.Print(client.AvaliablePorts())
 	log.Print(client.ActiveServices())
 	log.Print(client.GetRegisterEntryByPort(9931))
-	log.Print(client.GetRegisterEntryByName("ssh"))
+	log.Print(client.GetRegisterEntryByName("redis"))
 
 	log.Print("ALL DONE!")
 }

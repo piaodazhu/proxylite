@@ -109,7 +109,6 @@ func register(conn net.Conn, info RegisterInfo) error {
 	if err != nil {
 		return err
 	}
-
 	if mtype != TypeRegisterServiceRsp {
 		return errors.New("protocol mismatch")
 	}
@@ -180,7 +179,7 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	}
 
 	readFromService := func(inner net.Conn, uid uint32) {
-		buf := make([]byte, 4096)
+		buf := make([]byte, 32768)
 		var n int
 		var err error
 		var serviceEnd bool = false
@@ -202,7 +201,6 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 					writeUidUnsafe(buf[8:], uid)
 				}
 			}
-
 			err = sendMessageOnBuffer(serverConn, TypeDataSegment, buf, n+8) // uid(4) + close(4)
 			if err != nil {
 				break
@@ -217,28 +215,30 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	}
 
 	go func() {
-		buf := make([]byte, 4096)
+		buf := make([]byte, 32768)
 		var mtype, n int
 		var data []byte
 		var uid uint32
 		var innerConn *net.Conn
+		var newConn net.Conn
 		var ok, alive bool
 		var err error
 		for {
 			mtype, data, err = recvMessageWithBuffer(serverConn, buf)
 			if err != nil || mtype != TypeDataSegment {
+				log.Error(err, mtype)
 				break
 			}
-
 			uid, alive = readUidUnsafe(data)
 			if innerConn, ok = binder.getConn(uid); !ok {
 				// Blocking. can be optimized.
-				*innerConn, err = net.Dial("tcp", info.InnerAddr)
+				newConn, err = net.Dial("tcp", info.InnerAddr)
 				if err != nil {
 					// should close this client. leave it to below process.
 					readFromService(nil, uid)
 					continue
 				}
+				innerConn = &newConn
 				if !binder.allocConn(uid, GenConnId(innerConn), innerConn) {
 					// not suppose to reach here because proxy server will do concurrency control
 					break
