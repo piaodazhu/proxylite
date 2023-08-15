@@ -5,9 +5,7 @@ package proxylite
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -241,177 +239,85 @@ func (s *ProxyLiteServer) registerServiceResponse(conn net.Conn, req *RegisterSe
 
 // startTunnel The core of server. Very confusing code...
 func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
-	defer func() {
-		if err := recover(); err != nil {
-			s.logTunnelMessage(tn.info.Name, "PANIC", fmt.Sprint("tunnel panic, err=", err))
-		}
+	doOnce := sync.Once{}
+	binder := newConnUidBinder(2)
+	var totalOut, totalIn uint64
 
-		(*tn.innerConn).Close()
-		s.logTunnelMessage(tn.info.Name, "CLOSE", fmt.Sprint("tunnel closed, port=", tn.info.OuterPort))
-
-		tn.empty = true
-		fmt.Println("set empty ", tn.empty)
-		fmt.Println(s.used[tn.info.OuterPort])
-	}()
-
+	
 	// Now, register is OK, we want to map outer port to the inner client's socket
 	s.logTunnelMessage(tn.info.Name, "REGISTER", fmt.Sprintf("New inner client register port %d ok. Listening for outer client...", tn.info.OuterPort))
 
 	// First, listen on registered outer port.
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", tn.info.OuterPort))
 	if err != nil {
-		// panic(err)
+		(*tn.innerConn).Close()
 		return
 	}
-	// listener must be closed when leave this method
-	// defer listener.Close()
+	
+	// close both "proxy server <-> inner client" and "outer port listener" and all user connection
+	closeTunnel := func() {
+		(*tn.innerConn).Close()
+		listener.Close()
+		binder.closeAll()
+		s.logTunnelMessage(tn.info.Name, "CLOSE", fmt.Sprintf("tunnel closed, port=%d, Out %dB, In %dB", tn.info.OuterPort, totalOut, totalIn))
+	}
 
-	// outerConn is the connection between our outer port and user.
-	// var outerConn net.Conn
-
-	// outerAccept is a signaling channel.
-	// outerAccept := make(chan struct{})
-	// go func() {
-		// must close outerAccept when leaving this goroutine
-		// defer close(outerAccept)
-		// outerConn, err = listener.Accept()
-		// if err != nil {
-		// 	// TODO: We think error caused by listener being closed is normal. But what about other errors?
-		// 	return
-		// }
-		// here means we succeed to accept the connection
-		// outerAccept <- struct{}{}
-	// }()
-
-	// innerData is a temporary buffer channel to store the data send from inner client BEFORE any user connect to our outer port. We need to forward these data to user after the connection is readable.
-	// innerData := make(chan []byte, 64)
-
-	// innerEOF and innerOK is 2 possible exit state of below goroutine. We use them to decide whether abort this Tunnel.
-	// innerEOF := make(chan struct{})
-	// defer close(innerEOF)
-	// innerOK := make(chan struct{})
-	// defer close(innerOK)
-	// go func() {
-	// 	for {
-	// 		// in order to prevent the inner client connect from blocking reading, we set 1s deadline.
-	// 		(*tn.innerConn).SetReadDeadline(time.Now().Add(time.Second))
-	// 		buf := make([]byte, 4094)
-	// 		n, err := (*tn.innerConn).Read(buf)
-	// 		if err == io.EOF {
-	// 			// io.EOF means inner client active disconnect. We signal and close the EOF channel. Then return.
-	// 			innerEOF <- struct{}{}
-	// 			close(innerData)
-	// 			return
-	// 		}
-	// 		// TODO: we ignore the error caused by Deadline timeout. But what about other errors?
-
-	// 		if err == nil && n > 0 {
-	// 			// Here mean we do read some data from inner client. Now user haven't come, so we store the data for him.
-	// 			select {
-	// 			case innerData <- buf[:n]:
-	// 			// if innerData is already full, the select block will go to default.
-	// 			default:
-	// 				// we panic this condition. Don't worry this panic will be recovered.
-	// 				panic(errors.New("buffer overflow"))
-	// 			}
-	// 		}
-
-	// 		// Then we check whether we get the user connection.
-	// 		select {
-	// 		case <-outerAccept:
-	// 			// Now we already get the user connection. We will signal innerOK. Before that, we close the innerData buffer.
-	// 			// The sequence of below 2 lines are important. MAKE SURE innerData is closed when we for-range the data in it.
-	// 			close(innerData)
-	// 			innerOK <- struct{}{}
-	// 			return
-	// 		default:
-	// 			// Nothing happend. We continue the loop.
-	// 		}
-	// 	}
-	// }()
-
-	// // Now the judge the 2 possible exit state.
-	// select {
-	// case <-innerOK:
-	// 	// Now we get the connnect from user and already stored all data from innner client and we have closed the innerData chan.
-	// 	// Cancel the deadline
-	// 	(*tn.innerConn).SetReadDeadline(time.Time{})
-	// case <-innerEOF:
-	// 	// Now inner client close the connect. We just return and listener will be closed in defer func.
-	// 	return
-	// }
-
-	// // Don't forget to close the user connection
-	// defer outerConn.Close()
-
-	// Now real communication begins. We set tunnel busy.
-	// tn.busy = true
-
-	// Move each peace of buffered data to user conn.
-	// for data := range innerData {
-	// 	n, err := outerConn.Write(data)
-	// 	if err != nil {
-	// 		return
-	// 	}
-	// 	s.logTunnelMessage(tn.info.Name, "BUFMOVE", fmt.Sprintf("move %dB data from buffer to outer conn", n))
-	// }
-
-	// s.logTunnelMessage(tn.info.Name, "CONNECT", fmt.Sprintf("accpet connection from: %s", outerConn.RemoteAddr().String()))
-
-	// anyClose is a signal channel to wait any of 2 below goroutine exit.
-	// anyClose := make(chan struct{})
-
-	binder := newConnUidBinder(2)
+	// make sure tunnel closed and tn set empty before this function return
+	defer func() {
+		if err := recover(); err != nil {
+			s.logTunnelMessage(tn.info.Name, "PANIC", fmt.Sprint("tunnel panic, err=", err))
+		}
+		doOnce.Do(closeTunnel)
+		tn.empty = true
+		fmt.Println("set empty ", tn.empty)
+		fmt.Println(s.used[tn.info.OuterPort])
+	}()
+	
+	// read from tunnel and send to correct user
 	go func() {
-		// read from user conn and write to inner client
-		// total, err := io.Copy(*tn.innerConn, outerConn)
-		// s.logTunnelMessage(tn.info.Name, "FINISH", fmt.Sprintf("out->in finish: %v, [%d], [%v]", outerConn.RemoteAddr(), total, err))
-		// buf := make([]byte, 4096)
-		// for {
-			// recvMessageWithBuffer(outerConn, )
-		// }
-
-		// simple TCP
 		buf := make([]byte, 4096)
-		var n int
-		var total uint64
+		var mtype, n int
+		var data []byte
 		var err error
-
-		outerConnId := GenConnId(&outerConn)
-		var uid uint32
+		var outerConn *net.Conn
 		var ok bool
+		var uid uint32
 		for {
-			n, err = outerConn.Read(buf[12:]) // type(4) + length(4) + uid(4)
-			if err != nil {
+			// read from inner client
+			mtype, data, err = recvMessageWithBuffer(*tn.innerConn, buf)
+			if err != nil || mtype != TypeDataSegment {
 				break
 			}
 
-			if uid, ok = binder.getUid(outerConnId); !ok {
-				if uid, ok = binder.allocUid(outerConnId, &outerConn); !ok {
-					break
+			// get multiplex uid
+			uid = readUidUnsafe(data)
+			if outerConn, ok = binder.getConn(uid); !ok {
+				// unexpected uid, drop the pack
+				// TODO send a close signal
+				continue
+			}
+
+			// forward to the write user. (don't send 4 byte uid)
+			// here can be optimized by goroutines
+			n, err = (*outerConn).Write(data[4:])
+			if err != nil {
+				// how to send close thougth tunnel?
+				// TODO send a close signal
+				if binder.freeUidIfExists(GenConnId(outerConn)) {
+					(*outerConn).Close()
 				}
 			}
-
-			writeUidUnsafe(buf[8:], uid)
-
-			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+4) // + uid(4)
-			if err != nil {
-				break
-			}
-
-			total += uint64(n)
+			totalOut += uint64(n)
 		}
-		<-anyClose
+		doOnce.Do(closeTunnel)
 	}()
 
-	// sendLoop
-	sendLoop := func(outerConn net.Conn, outerConnId uint64, uid uint32) {
+	// read from user and send to tunnel
+	readFromUser := func(outerConn net.Conn, outerConnId uint64, uid uint32) {
 		buf := make([]byte, 4096)
 		var n int
-		var total uint64
 		var err error
 
-		var ok bool
 		for {
 			n, err = outerConn.Read(buf[12:]) // type(4) + length(4) + uid(4)
 			if err != nil {
@@ -420,62 +326,35 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 			}
 
 			writeUidUnsafe(buf[8:], uid)
-
 			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+4) // + uid(4)
 			if err != nil {
 				// end this tunnel
+				doOnce.Do(closeTunnel)
 				break
 			}
-
-			total += uint64(n)
+			totalIn += uint64(n)
+		}
+		if binder.freeUidIfExists(GenConnId(&outerConn)) {
+			outerConn.Close()
+			s.logTunnelMessage(tn.info.Name, "FINISH", fmt.Sprintf("in->out finish: %v, [%v]", outerConn.RemoteAddr(), err))
+		}
 	}
 
-	// accept
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				break 
-			}
-			connId := GenConnId(&conn)
-			if uid, ok := binder.allocUid(connId, &conn); ok {
-				go sendLoop(conn, connId, uid)
-			} else {
-				conn.Close()
-			}
+	// accept new user and alloc uid and start send loop
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			break
 		}
-	} ()
-
-	go func() {
-		// read from inner conn and write to user conn
-		// total, err := io.Copy(outerConn, *tn.innerConn)
-		// s.logTunnelMessage(tn.info.Name, "FINISH", fmt.Sprintf("in->out finish: %v, [%d], [%v]", outerConn.RemoteAddr(), total, err))
-		
-		buf := make([]byte, 4096)
-		var mtype, n int
-		var total uint64
-		var data []byte 
-		var err error
-		for {
-			mtype, data, err = recvMessageWithBuffer(*tn.innerConn, buf)
-			if err != nil || mtype != TypeDataSegment {
-				break
-			}
-
-			n, err = outerConn.Write(data)
-			if err != nil {
-				break
-			}
-
-			total += uint64(n)
+		connId := GenConnId(&conn)
+		if uid, ok := binder.allocUid(connId, &conn); ok {
+			go readFromUser(conn, connId, uid)
+		} else {
+			conn.Close()
 		}
-		<-anyClose
-	}()
-
-	// write anyClose will block here until any of 2 above gouroutine done. Then we close it.
-	anyClose <- struct{}{}
-	close(anyClose)
-
+	}
+	doOnce.Do(closeTunnel)
+	
 	// Drain out the sending buffer. The Tunnel can be destroy now.
 	time.Sleep(time.Millisecond * 10)
 }

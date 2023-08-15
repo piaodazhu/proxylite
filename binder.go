@@ -53,7 +53,7 @@ type connUidBinder struct {
 func newConnUidBinder(cap int) *connUidBinder {
 	var maxConn int32 = 10000
 	if cap > 0 {
-		maxConn = int32(maxConn)
+		maxConn = int32(cap)
 	}
 	return &connUidBinder{
 		connIdToUid: sync.Map{},
@@ -129,7 +129,7 @@ func (c *connUidBinder) freeConnIfExists(uid uint32) bool {
 func (c *connUidBinder) closeAll() {
 	uids := []uint32{}
 	conns := []*net.Conn{}
-	c.connIdToUid.Range(func(key, value interface{}) bool {
+	c.uidToConn.Range(func(key, value interface{}) bool {
 		uids = append(uids, key.(uint32))
 		conns = append(conns, value.(*net.Conn))
 		return true
