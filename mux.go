@@ -10,24 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// conn can be hash to uid, uid can map to conn
-type connUidBinder struct {
-	connIdToUid sync.Map
-	uidToConn   sync.Map
-	remains     int32
-}
-
-func newConnUidBinder(cap int) *connUidBinder {
-	var maxConn int32 = 10000
-	if cap > 0 {
-		maxConn = int32(maxConn)
-	}
-	return &connUidBinder{
-		connIdToUid: sync.Map{},
-		uidToConn:   sync.Map{},
-		remains:     maxConn,
-	}
-}
 
 func GenConnId(conn *net.Conn) uint64 {
 	var tuple [256]byte
@@ -61,6 +43,25 @@ func readUidUnsafe(buf []byte) uint32 {
 	return binary.LittleEndian.Uint32(buf)
 }
 
+// conn can be hash to uid, uid can map to conn
+type connUidBinder struct {
+	connIdToUid sync.Map
+	uidToConn   sync.Map
+	remains     int32
+}
+
+func newConnUidBinder(cap int) *connUidBinder {
+	var maxConn int32 = 10000
+	if cap > 0 {
+		maxConn = int32(maxConn)
+	}
+	return &connUidBinder{
+		connIdToUid: sync.Map{},
+		uidToConn:   sync.Map{},
+		remains:     maxConn,
+	}
+}
+
 func (c *connUidBinder) getConn(uid uint32) (*net.Conn, bool) {
 	if conn, ok := c.uidToConn.Load(uid); ok {
 		return conn.(*net.Conn), true
@@ -92,11 +93,13 @@ func (c *connUidBinder) allocUid(connId uint64, conn *net.Conn) (uint32, bool) {
 	return uid, true
 }
 
-func (c *connUidBinder) freeUidIfExists(connId uint64) {
+func (c *connUidBinder) freeUidIfExists(connId uint64) bool {
 	if uid, ok := c.connIdToUid.LoadAndDelete(connId); ok {
 		c.uidToConn.LoadAndDelete(uid)
 		atomic.AddInt32(&c.remains, 1)
+		return true
 	}
+	return false
 }
 
 func (c *connUidBinder) allocConn(uid uint32, connId uint64, conn *net.Conn) bool {
@@ -114,9 +117,26 @@ func (c *connUidBinder) allocConn(uid uint32, connId uint64, conn *net.Conn) boo
 	return true
 }
 
-func (c *connUidBinder) freeConnIfExists(uid uint32) {
+func (c *connUidBinder) freeConnIfExists(uid uint32) bool {
 	if conn, ok := c.uidToConn.LoadAndDelete(uid); ok {
 		c.connIdToUid.LoadAndDelete(GenConnId(conn.(*net.Conn)))
 		atomic.AddInt32(&c.remains, 1)
+		return true
+	}
+	return false
+}
+
+func (c *connUidBinder) closeAll() {
+	uids := []uint32{}
+	conns := []*net.Conn{}
+	c.connIdToUid.Range(func(key, value interface{}) bool {
+		uids = append(uids, key.(uint32))
+		conns = append(conns, value.(*net.Conn))
+		return true
+	})
+	for i := range uids {
+		if c.freeConnIfExists(uids[i]) {
+			(*conns[i]).Close()
+		}
 	}
 }

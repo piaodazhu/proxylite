@@ -7,7 +7,6 @@ import (
 	"net"
 	"sort"
 	"sync"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -166,10 +165,12 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	}
 
 	// cancelFunc can be used to cancel the service mapping
-	cancel := make(chan struct{})
+	// cancel := make(chan struct{})
 	cancelFunc := func() {
-		cancel <- struct{}{}
-		close(cancel)
+		// cancel <- struct{}{}
+		// close(cancel)
+
+		serverConn.Close()
 	}
 
 	// done channel can be used to wait the service mapping finish
@@ -229,64 +230,70 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 		// tell him loop is done!
 
 		// TODO A: A and B just do one
-		inner.Close()
-		binder.freeConnIfExists(uid)
+		if binder.freeConnIfExists(uid) {
+			inner.Close()
+		}
 	}
 
 	go func() {
 		// anyClose is a signal channel to wait any of 2 below goroutine exit.
 		// anyClose := make(chan struct{})
 
-		go func() {
-			// total, err := io.Copy(innerConn, serverConn)
-			// c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("server->inner Finish [%d], [%v]", total, err))
+		// go func() {
+		// total, err := io.Copy(innerConn, serverConn)
+		// c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("server->inner Finish [%d], [%v]", total, err))
 
-			buf := make([]byte, 4096)
-			var mtype, n int
-			var total uint64
-			var data []byte
+		buf := make([]byte, 4096)
+		var mtype, n int
+		var total uint64
+		var data []byte
 
-			var uid uint32
-			var innerConn *net.Conn
-			var ok bool
+		var uid uint32
+		var innerConn *net.Conn
+		var ok bool
 
-			for {
-				// TODO set deadline and allow cancel
-				mtype, data, err = recvMessageWithBuffer(serverConn, buf)
-				if err != nil || mtype != TypeDataSegment {
+		// ctx, cancelTunnel := context.WithCancel(context.Background())
+
+		for {
+			// TODO set deadline and allow cancel
+			mtype, data, err = recvMessageWithBuffer(serverConn, buf)
+			if err != nil || mtype != TypeDataSegment {
+				break
+			}
+
+			uid = readUidUnsafe(data)
+			if innerConn, ok = binder.getConn(uid); !ok {
+				c, err := net.Dial("tcp", info.InnerAddr)
+				if err != nil {
+					// break
+					// should lead it to a black hole?
+				}
+				innerConn = &c
+				if !binder.allocConn(uid, GenConnId(innerConn), innerConn) {
+					// not suppose to reach here because proxy server will do concurrency control
 					break
 				}
 
-				uid = readUidUnsafe(data)
-				if innerConn, ok = binder.getConn(uid); !ok {
-					c, err := net.Dial("tcp", info.InnerAddr)
-					if err != nil {
-						break
-					}
-					innerConn = &c
-					if !binder.allocConn(uid, GenConnId(innerConn), innerConn) {
-						break
-					}
-
-					go recvLoop(c, uid)
-				}
-
-				n, err = (*innerConn).Write(data)
-				if err != nil {
-					// break
-					// not break just for one client. but tell him the conn done!
-					
-					// TODO B: A and B just do one
-					(*innerConn).Close()
-					binder.freeConnIfExists(uid)
-				}
-
-				total += uint64(n)
+				go recvLoop(c, uid)
 			}
 
-			binder.freeConnIfExists(uid)
-			// <-anyClose
-		}()
+			n, err = (*innerConn).Write(data)
+			if err != nil {
+				// break
+				// not break just for one client. but tell him the conn done!
+
+				// B: A and B just do one
+				if binder.freeConnIfExists(uid) {
+					(*innerConn).Close()
+				}
+			}
+
+			total += uint64(n)
+		}
+
+		binder.closeAll()
+		// <-anyClose
+		// }()
 
 		// go func() {
 		// 	// total, err := io.Copy(serverConn, innerConn)
@@ -312,30 +319,33 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 
 		// select {
 		// case anyClose <- struct{}{}:
-			// Any of 2 above gouroutine done.
+		// Any of 2 above gouroutine done.
 		// case <-cancel:
-			// Here we receive cancel signal by caller.
-			// c.logTunnelMessage(info.Name, "CANCEL", "service cancelled")
+		// Here we receive cancel signal by caller.
+		// c.logTunnelMessage(info.Name, "CANCEL", "service cancelled")
 		// }
 
 		// Good principle: let writer goroutine to close the channel.
 		// close(anyClose)
 
 		// Drain out the sending buffer. The Tunnel can be destroy now.
-		time.Sleep(time.Millisecond * 10)
+		// time.Sleep(time.Millisecond * 10)
 		// innerConn.Close()
-		serverConn.Close()
+
+		// cancelFunc should be called actively
+
+		// serverConn.Close()
 
 		// Tell caller that the service mapping is already finish.
-		done <- struct{}{}
-		close(done)
 
 		c.logTunnelMessage(info.Name, "UNREGISTER", "service unregister")
-
 		// Delete the service mapping from table.
 		c.lock.Lock()
 		delete(c.registered, info.OuterPort)
 		c.lock.Unlock()
+
+		done <- struct{}{}
+		close(done)
 	}()
 	return nil
 }
