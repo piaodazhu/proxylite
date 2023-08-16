@@ -2,8 +2,11 @@ package proxylite
 
 import (
 	"encoding/binary"
+	"errors"
 	"net"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -15,12 +18,14 @@ const (
 	TypeAskServiceRsp
 	TypeRegisterServiceReq
 	TypeRegisterServiceRsp
+
+	TypeDataSegment = 64
 )
 
-// AskFreePortReq Ask avaliable free ports request 
+// AskFreePortReq Ask avaliable free ports request
 type AskFreePortReq struct{}
 
-// AskFreePortRsp Ask avaliable free ports response 
+// AskFreePortRsp Ask avaliable free ports response
 type AskFreePortRsp struct {
 	Ports []int
 }
@@ -69,6 +74,21 @@ type AskServiceRsp struct {
 	Services []ServiceInfo
 }
 
+func writeUidUnsafe(buf []byte, uid uint32) {
+	binary.LittleEndian.PutUint32(buf, uid)
+}
+
+func writeUidWithCloseUnsafe(buf []byte, uid uint32) {
+	binary.LittleEndian.PutUint32(buf, uid)
+	binary.LittleEndian.PutUint32(buf[4:], 886)
+}
+
+func readUidUnsafe(buf []byte) (uint32, bool) {
+	uid := binary.LittleEndian.Uint32(buf)
+	close := binary.LittleEndian.Uint32(buf[4:])
+	return uid, close == 0
+}
+
 func sendMessage(conn net.Conn, mtype int, raw []byte) error {
 	Len := len(raw)
 	Buf := make([]byte, Len+8)
@@ -115,4 +135,59 @@ func recvMessage(conn net.Conn) (int, []byte, error) {
 		Offset += n
 	}
 	return mtype, Buf, nil
+}
+
+func sendMessageOnBuffer(conn net.Conn, mtype int, buffer []byte, dlen int) error {
+	if len(buffer) < dlen+8 {
+		return errors.New("send buffer too small")
+	}
+
+	binary.LittleEndian.PutUint32(buffer[0:], uint32(mtype))
+	binary.LittleEndian.PutUint32(buffer[4:], uint32(dlen))
+
+	Offset := 0
+	for Offset < dlen+8 {
+		n, err := conn.Write(buffer[Offset : dlen+8])
+		if err != nil {
+			return err
+		}
+
+		Offset += n
+	}
+	return nil
+}
+
+func recvMessageWithBuffer(conn net.Conn, buffer []byte) (int, []byte, error) {
+	Len := 0
+	if len(buffer) < 8 {
+		return 0, nil, errors.New("recv buffer too small")
+	}
+
+	Offset := 0
+	for Offset < 8 {
+		n, err := conn.Read(buffer[Offset:8])
+		if err != nil {
+			return 0, nil, err
+		}
+		Offset += n
+	}
+
+	mtype := int(binary.LittleEndian.Uint32(buffer[0:]))
+	Len = int(binary.LittleEndian.Uint32(buffer[4:]))
+	if len(buffer) < Len+8 {
+		logrus.Warnf("the given recv buffer length is %d while segment requires %d", len(buffer), Len+8)
+		buffer = make([]byte, Len)
+	} else {
+		buffer = buffer[8:]
+	}
+
+	Offset = 0
+	for Offset < Len {
+		n, err := conn.Read(buffer[Offset:Len])
+		if err != nil {
+			return 0, nil, err
+		}
+		Offset += n
+	}
+	return mtype, buffer[:Len], nil
 }

@@ -13,7 +13,7 @@ One day, I needed to add TCP NAT traversal to [my project](https://github.com/pi
 
 So why not write a package to make this more elegant? proxylite was born. Its main features are listed below:
 1. Easy to integrate into code. Both server and client structures are provided. Just import this package then register tunnels whenever you want.
-2. Dynamic on-demand reverse proxy. **One registration, one port, one user, one tcp connection.**
+2. Dynamic on-demand reverse proxy with online user number control.
 3. Service registration and discovery.
 4. Customized hooks are support. (Under development)
 

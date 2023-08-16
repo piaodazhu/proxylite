@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sort"
 	"sync"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -16,11 +14,11 @@ import (
 // RegisterEntry entry to discribe a single service registration
 type RegisterEntry struct {
 	// Basic Info
-	Info   RegisterInfo
+	Info RegisterInfo
 	// Cancel function
 	Cancel func()
 	// Done channel
-	Done   <-chan struct{}
+	Done <-chan struct{}
 }
 
 // ProxyLiteClient inner client that forwards traffic between inner service and proxy server server.
@@ -111,7 +109,6 @@ func register(conn net.Conn, info RegisterInfo) error {
 	if err != nil {
 		return err
 	}
-
 	if mtype != TypeRegisterServiceRsp {
 		return errors.New("protocol mismatch")
 	}
@@ -127,7 +124,7 @@ func register(conn net.Conn, info RegisterInfo) error {
 	return nil
 }
 
-// SetLogger Set customized logrus logger for the inner client. 
+// SetLogger Set customized logrus logger for the inner client.
 func (c *ProxyLiteClient) SetLogger(logger *log.Logger) {
 	c.logger = logger
 }
@@ -143,17 +140,9 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 		return errors.New("ports is occupied")
 	}
 
-	// If we cannot connect to inner target service. We should not register this service to proxy server.
-	innerConn, err := net.Dial("tcp", info.InnerAddr)
-	if err != nil {
-		return err
-	}
-
-	// If we cannot connect to proxy server. We cannot register any service. And set client not ready.
 	serverConn, err := net.Dial("tcp", c.serverAddr)
 	if err != nil {
 		c.ready = false
-		innerConn.Close()
 		return err
 	}
 
@@ -161,20 +150,26 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	err = register(serverConn, info)
 	c.logTunnelMessage(info.Name, "REGISTER", fmt.Sprint("err=", err))
 	if err != nil {
-		innerConn.Close()
 		serverConn.Close()
 		return err
 	}
 
-	// cancelFunc can be used to cancel the service mapping
-	cancel := make(chan struct{})
-	cancelFunc := func() {
-		cancel <- struct{}{}
-		close(cancel)
+	binder := newConnUidBinder(0)
+	doOnce := sync.Once{}
+	done := make(chan struct{})
+
+	var totalOut, totalIn uint64
+	closeTunnel := func() {
+		serverConn.Close()
+		binder.closeAll()
+		done <- struct{}{}
+		close(done)
+		c.logTunnelMessage(info.Name, "CLOSE", fmt.Sprintf("tunnel closed, Out %dB, In %dB", totalOut, totalIn))
 	}
 
-	// done channel can be used to wait the service mapping finish
-	done := make(chan struct{})
+	cancelFunc := func() {
+		doOnce.Do(closeTunnel)
+	}
 
 	// Now we can add the new entry to registered table.
 	c.registered[info.OuterPort] = &RegisterEntry{
@@ -183,44 +178,92 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 		Done:   done,
 	}
 
+	readFromService := func(inner net.Conn, uid uint32) {
+		buf := make([]byte, 32768)
+		var n int
+		var err error
+		var serviceEnd bool = false
+		for !serviceEnd {
+			if inner == nil {
+				// no inner service. send user close
+				c.logTunnelMessage(info.Name, "NOSRV", fmt.Sprintf("service not avaliable, uid[%d] [%v]", uid, err))
+				n = 0
+				writeUidWithCloseUnsafe(buf[8:], uid)
+				serviceEnd = true
+			} else {
+				// has inner serivce. read from service
+				n, err = inner.Read(buf[16:]) // type(4) + length(4) + uid(4) + close(4)
+				if err != nil {
+					// read this service failed. send user close
+					writeUidWithCloseUnsafe(buf[8:], uid)
+					serviceEnd = true
+				} else {
+					writeUidUnsafe(buf[8:], uid)
+				}
+			}
+			err = sendMessageOnBuffer(serverConn, TypeDataSegment, buf, n+8) // uid(4) + close(4)
+			if err != nil {
+				break
+			}
+
+			totalOut += uint64(n)
+		}
+		if binder.freeConnIfExists(uid) {
+			inner.Close()
+			c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("one user finish, uid[%d] [%v]", uid, err))
+		}
+	}
+
 	go func() {
-		// anyClose is a signal channel to wait any of 2 below goroutine exit.
-		anyClose := make(chan struct{})
+		buf := make([]byte, 32768)
+		var mtype, n int
+		var data []byte
+		var uid uint32
+		var innerConn *net.Conn
+		var newConn net.Conn
+		var ok, alive bool
+		var err error
+		for {
+			mtype, data, err = recvMessageWithBuffer(serverConn, buf)
+			if err != nil || mtype != TypeDataSegment {
+				log.Error(err, mtype)
+				break
+			}
+			uid, alive = readUidUnsafe(data)
+			if innerConn, ok = binder.getConn(uid); !ok {
+				// Blocking. can be optimized.
+				newConn, err = net.Dial("tcp", info.InnerAddr)
+				if err != nil {
+					// should close this client. leave it to below process.
+					readFromService(nil, uid)
+					continue
+				}
+				innerConn = &newConn
+				if !binder.allocConn(uid, GenConnId(innerConn), innerConn) {
+					// not suppose to reach here because proxy server will do concurrency control
+					break
+				}
+				go readFromService(*innerConn, uid)
+			} else if !alive {
+				if binder.freeConnIfExists(uid) {
+					(*innerConn).Close()
+					c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("one user finish, uid[%d] [%v]", uid, err))
+				}
+			}
 
-		go func() {
-			total, err := io.Copy(innerConn, serverConn)
-			c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("server->inner Finish [%d], [%v]", total, err))
-			<-anyClose
-		}()
-
-		go func() {
-			total, err := io.Copy(serverConn, innerConn)
-			c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("inner->server Finish [%d], [%v]", total, err))
-			<-anyClose
-		}()
-
-		select {
-		case anyClose <- struct{}{}:
-			// Any of 2 above gouroutine done.
-		case <-cancel:
-			// Here we receive cancel signal by caller.
-			c.logTunnelMessage(info.Name, "CANCEL", "service cancelled")
+			n, err = (*innerConn).Write(data[8:])
+			if err != nil {
+				if binder.freeConnIfExists(uid) {
+					(*innerConn).Close()
+					c.logTunnelMessage(info.Name, "FINISH", fmt.Sprintf("one user finish, uid[%d] [%v]", uid, err))
+				}
+			}
+			totalIn += uint64(n)
 		}
 
-		// Good principle: let writer goroutine to close the channel.
-		close(anyClose)
-
-		// Drain out the sending buffer. The Tunnel can be destroy now.
-		time.Sleep(time.Millisecond * 10)
-		innerConn.Close()
-		serverConn.Close()
-
-		// Tell caller that the service mapping is already finish.
-		done <- struct{}{}
-		close(done)
+		doOnce.Do(closeTunnel)
 
 		c.logTunnelMessage(info.Name, "UNREGISTER", "service unregister")
-
 		// Delete the service mapping from table.
 		c.lock.Lock()
 		delete(c.registered, info.OuterPort)
@@ -315,4 +358,3 @@ func DiscoverServices(addr string) ([]ServiceInfo, error) {
 
 	return rsp.Services, nil
 }
-
