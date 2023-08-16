@@ -2,3 +2,5 @@
 - [ ] Unit Tests
 - [ ] Code Report
 - [ ] Benchmark
+- [ ] Register arguments: maxConn, maxServeNum, maxServeTime
+- [ ] Active user status
