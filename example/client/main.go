@@ -22,6 +22,7 @@ func main() {
 			Name:      "redis",
 			Message:   "redis kv",
 		},
+		proxylite.ControlInfo{},
 	))
 
 	log.Print(client.AvaliablePorts())

@@ -15,6 +15,8 @@ import (
 type RegisterEntry struct {
 	// Basic Info
 	Info RegisterInfo
+	// Control Info
+	Ctrl ControlInfo
 	// Cancel function
 	Cancel func()
 	// Done channel
@@ -26,8 +28,8 @@ type ProxyLiteClient struct {
 	ready          bool
 	serverAddr     string
 	lock           sync.RWMutex
-	avaliablePorts map[int]struct{}
-	registered     map[int]*RegisterEntry
+	avaliablePorts map[uint32]struct{}
+	registered     map[uint32]*RegisterEntry
 	logger         *log.Logger
 }
 
@@ -36,11 +38,11 @@ func NewProxyLiteClient(serverAddr string) *ProxyLiteClient {
 	client := &ProxyLiteClient{
 		ready:          false,
 		serverAddr:     serverAddr,
-		avaliablePorts: map[int]struct{}{},
-		registered:     map[int]*RegisterEntry{},
+		avaliablePorts: map[uint32]struct{}{},
+		registered:     map[uint32]*RegisterEntry{},
 		logger:         log.New(),
 	}
-	client.logger.SetReportCaller(true)
+	// client.logger.SetReportCaller(true)
 
 	ports, err := AskFreePort(serverAddr)
 	if err != nil {
@@ -54,7 +56,7 @@ func NewProxyLiteClient(serverAddr string) *ProxyLiteClient {
 }
 
 // AvaliablePorts Get avaliable ports from proxy server.
-func (c *ProxyLiteClient) AvaliablePorts() ([]int, bool) {
+func (c *ProxyLiteClient) AvaliablePorts() ([]uint32, bool) {
 	ports, err := AskFreePort(c.serverAddr)
 	if err != nil {
 		c.ready = false
@@ -68,7 +70,7 @@ func (c *ProxyLiteClient) AvaliablePorts() ([]int, bool) {
 }
 
 // AnyPort Get a random avaliable port from proxy server.
-func (c *ProxyLiteClient) AnyPort() (int, bool) {
+func (c *ProxyLiteClient) AnyPort() (uint32, bool) {
 	if c.ready {
 		for port := range c.avaliablePorts {
 			return port, true
@@ -92,12 +94,10 @@ func (c *ProxyLiteClient) ActiveServices() ([]ServiceInfo, error) {
 	return DiscoverServices(c.serverAddr)
 }
 
-func register(conn net.Conn, info RegisterInfo) error {
+func register(conn net.Conn, info RegisterInfo, ctrl ControlInfo) error {
 	req := RegisterServiceReq{
-		Info: RegisterInfo{
-			OuterPort: info.OuterPort,
-			InnerAddr: info.InnerAddr,
-		},
+		Info: info,
+		Ctrl: ctrl,
 	}
 	raw, _ := json.Marshal(req)
 	err := sendMessage(conn, TypeRegisterServiceReq, raw)
@@ -130,33 +130,33 @@ func (c *ProxyLiteClient) SetLogger(logger *log.Logger) {
 }
 
 // RegisterInnerService Register inner server to proxy server's outer port.
-func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
+func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo, ctrl ControlInfo) (func(), chan struct{}, error) {
 	if !c.ready {
-		return errors.New("client not ready")
+		return nil, nil, errors.New("client not ready")
 	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if _, exists := c.registered[info.OuterPort]; exists {
-		return errors.New("ports is occupied")
+		return nil, nil, errors.New("ports is occupied")
 	}
 
 	serverConn, err := net.Dial("tcp", c.serverAddr)
 	if err != nil {
 		c.ready = false
-		return err
+		return nil, nil, err
 	}
 
 	// Register the service must return nil.
-	err = register(serverConn, info)
+	err = register(serverConn, info, ctrl)
 	c.logTunnelMessage(info.Name, "REGISTER", fmt.Sprint("err=", err))
 	if err != nil {
 		serverConn.Close()
-		return err
+		return nil, nil, err
 	}
 
 	binder := newConnUidBinder(0)
 	doOnce := sync.Once{}
-	done := make(chan struct{})
+	done := make(chan struct{}, 1)
 
 	var totalOut, totalIn uint64
 	closeTunnel := func() {
@@ -174,6 +174,7 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 	// Now we can add the new entry to registered table.
 	c.registered[info.OuterPort] = &RegisterEntry{
 		Info:   info,
+		Ctrl:   ctrl,
 		Cancel: cancelFunc,
 		Done:   done,
 	}
@@ -220,19 +221,18 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 		var data []byte
 		var uid uint32
 		var innerConn *net.Conn
-		var newConn net.Conn
 		var ok, alive bool
 		var err error
 		for {
 			mtype, data, err = recvMessageWithBuffer(serverConn, buf)
 			if err != nil || mtype != TypeDataSegment {
-				log.Error(err, mtype)
+				c.logger.Error(err, mtype)
 				break
 			}
 			uid, alive = readUidUnsafe(data)
 			if innerConn, ok = binder.getConn(uid); !ok {
 				// Blocking. can be optimized.
-				newConn, err = net.Dial("tcp", info.InnerAddr)
+				newConn, err := net.Dial("tcp", info.InnerAddr)
 				if err != nil {
 					// should close this client. leave it to below process.
 					readFromService(nil, uid)
@@ -269,7 +269,7 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error {
 		delete(c.registered, info.OuterPort)
 		c.lock.Unlock()
 	}()
-	return nil
+	return cancelFunc, done, nil
 }
 
 // GetRegisterEntryByName Get RegisterEntry
@@ -288,7 +288,7 @@ func (c *ProxyLiteClient) GetRegisterEntryByName(name string) (*RegisterEntry, b
 func (c *ProxyLiteClient) GetRegisterEntryByPort(port int) (*RegisterEntry, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	entry, exists := c.registered[port]
+	entry, exists := c.registered[uint32(port)]
 	return entry, exists
 }
 
@@ -297,7 +297,7 @@ func (c *ProxyLiteClient) logTunnelMessage(service, header, msg string) {
 }
 
 // AskFreePort Ask avaliable free port from proxy server with given address.
-func AskFreePort(addr string) ([]int, error) {
+func AskFreePort(addr string) ([]uint32, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -324,7 +324,9 @@ func AskFreePort(addr string) ([]int, error) {
 		return nil, err
 	}
 
-	sort.Ints(rsp.Ports)
+	sort.Slice(rsp.Ports, func(i, j int) bool {
+		return rsp.Ports[i] < rsp.Ports[j]
+	})
 	return rsp.Ports, nil
 }
 
