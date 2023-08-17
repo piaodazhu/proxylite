@@ -4,6 +4,7 @@ Package proxylite is a dynamic reverse proxy package for Go.
 package proxylite
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	sem "golang.org/x/sync/semaphore"
 )
 
 type tunnel struct {
@@ -19,24 +21,25 @@ type tunnel struct {
 	birth     time.Time
 	innerConn *net.Conn
 	info      *RegisterInfo
+	ctrl      *ControlInfo
 }
 
 // ProxyLiteServer Public server that forwards traffic between user and inner client.
 type ProxyLiteServer struct {
-	all    map[int]struct{}
+	all    map[uint32]struct{}
 	lock   sync.RWMutex
-	used   map[int]*tunnel
+	used   map[uint32]*tunnel
 	logger *log.Logger
 }
 
 // NewProxyLiteServer Create a Proxy server with avaliable ports intervals.
 func NewProxyLiteServer(portIntervals ...[2]int) *ProxyLiteServer {
 	server := &ProxyLiteServer{
-		all:    map[int]struct{}{},
-		used:   map[int]*tunnel{},
+		all:    map[uint32]struct{}{},
+		used:   map[uint32]*tunnel{},
 		logger: log.New(),
 	}
-	server.logger.SetReportCaller(true)
+	// server.logger.SetReportCaller(true)
 	for _, intervals := range portIntervals {
 		server.AddPort(intervals[0], intervals[1])
 	}
@@ -49,7 +52,7 @@ func (s *ProxyLiteServer) AddPort(from, to int) bool {
 		return false
 	}
 	for p := from; p <= to; p++ {
-		s.all[p] = struct{}{}
+		s.all[uint32(p)] = struct{}{}
 	}
 	return true
 }
@@ -115,7 +118,7 @@ func (s *ProxyLiteServer) serve(conn net.Conn) error {
 
 func (s *ProxyLiteServer) handleAskFreePort(conn net.Conn, req *AskFreePortReq) error {
 	defer conn.Close()
-	freePorts := []int{}
+	freePorts := []uint32{}
 
 	s.lock.RLock()
 	for port := range s.all {
@@ -130,7 +133,6 @@ func (s *ProxyLiteServer) handleAskFreePort(conn net.Conn, req *AskFreePortReq) 
 	rsp := AskFreePortRsp{
 		Ports: freePorts,
 	}
-	fmt.Println("#", freePorts)
 	defer s.logProtocolMessage(conn.RemoteAddr().String(), "AskFreePort", req, &rsp)
 
 	raw, _ := json.Marshal(rsp)
@@ -144,7 +146,6 @@ func (s *ProxyLiteServer) handleAskFreePort(conn net.Conn, req *AskFreePortReq) 
 func (s *ProxyLiteServer) handleAskService(conn net.Conn, req *AskServiceReq) error {
 	defer conn.Close()
 	Services := []ServiceInfo{}
-	fmt.Println("* ", s.used[9931])
 	s.lock.RLock()
 
 	for _, t := range s.used {
@@ -189,6 +190,7 @@ func (s *ProxyLiteServer) handleRegisterService(conn net.Conn, req *RegisterServ
 			birth:     time.Now(),
 			innerConn: &conn,
 			info:      &req.Info,
+			ctrl:      &req.Ctrl,
 		}
 		s.used[req.Info.OuterPort] = tn
 	} else if tn.empty { // reuse
@@ -197,6 +199,7 @@ func (s *ProxyLiteServer) handleRegisterService(conn net.Conn, req *RegisterServ
 		tn.birth = time.Now()
 		tn.innerConn = &conn
 		tn.info = &req.Info
+		tn.ctrl = &req.Ctrl
 	} else {
 		return s.registerServiceResponse(conn, req, RegisterRspPortOccupied)
 	}
@@ -220,7 +223,7 @@ func (s *ProxyLiteServer) handleMsgMalformed(conn net.Conn) error {
 	return fmt.Errorf("msg is malformed")
 }
 
-func (s *ProxyLiteServer) registerServiceResponse(conn net.Conn, req *RegisterServiceReq, code int) error {
+func (s *ProxyLiteServer) registerServiceResponse(conn net.Conn, req *RegisterServiceReq, code int32) error {
 	if code != RegisterRspOK {
 		defer conn.Close()
 	}
@@ -240,7 +243,7 @@ func (s *ProxyLiteServer) registerServiceResponse(conn net.Conn, req *RegisterSe
 // startTunnel The core of server. Very confusing code...
 func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 	doOnce := sync.Once{}
-	binder := newConnUidBinder(2)
+	binder := newConnUidBinder(0)
 	var totalOut, totalIn uint64
 
 	// Now, register is OK, we want to map outer port to the inner client's socket
@@ -261,15 +264,46 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		s.logTunnelMessage(tn.info.Name, "CLOSE", fmt.Sprintf("tunnel closed, port=%d, Out %dB, In %dB", tn.info.OuterPort, totalOut, totalIn))
 	}
 
+	// if MaxServeTime is set, close all conn after MaxServeTime s
+	var timeoutTimer *time.Timer
+	if tn.ctrl.MaxServeTime > 0 {
+		timeoutTimer = time.AfterFunc(time.Second*time.Duration(tn.ctrl.MaxServeTime), func() {
+			doOnce.Do(closeTunnel)
+		})
+	}
+
+	// if MaxServeConn is set, use semaphore for concurrency control
+	var concurrency *sem.Weighted
+	if tn.ctrl.MaxServeConn > 0 {
+		concurrency = sem.NewWeighted(int64(tn.ctrl.MaxServeConn))
+	} else {
+		concurrency = sem.NewWeighted(10000) // only for max 10K user
+	}
+
+	// if MaxServeCount is set not zero, only serve MaxServeCount users.
+	var comming, leaving *sem.Weighted
+	var finiteServeCount bool = false
+	lastFinish := sync.WaitGroup{}
+	if tn.ctrl.MaxServeCount > 0 {
+		finiteServeCount = true
+		comming = sem.NewWeighted(int64(tn.ctrl.MaxServeCount))
+		leaving = sem.NewWeighted(int64(tn.ctrl.MaxServeCount) - 1) // last one leave, close tunnel
+		lastFinish.Add(1)
+	}
+
 	// make sure tunnel closed and tn set empty before this function return
 	defer func() {
 		if err := recover(); err != nil {
 			s.logTunnelMessage(tn.info.Name, "PANIC", fmt.Sprint("tunnel panic, err=", err))
 		}
+		if timeoutTimer != nil && !timeoutTimer.Stop() {
+			select { // timer may not be triggered. If so we drain it out.
+			case <-timeoutTimer.C:
+			default:
+			}
+		}
 		doOnce.Do(closeTunnel)
 		tn.empty = true
-		fmt.Println("set empty ", tn.empty)
-		fmt.Println(s.used[tn.info.OuterPort])
 	}()
 
 	// read from tunnel and send to correct user
@@ -324,7 +358,6 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		for !userEnd {
 			n, err = outerConn.Read(buf[16:]) // type(4) + length(4) + uid(4) + close(4)
 			if err != nil {
-				log.Error(err)
 				// end this link
 				writeUidWithCloseUnsafe(buf[8:], uid)
 				userEnd = true
@@ -343,10 +376,25 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 			outerConn.Close()
 			s.logTunnelMessage(tn.info.Name, "FINISH", fmt.Sprintf("in->out finish: %v, [%v]", outerConn.RemoteAddr(), err))
 		}
+		concurrency.Release(1)
+		// if MaxServeCount is defined and the last one user leave
+		if finiteServeCount && !leaving.TryAcquire(1) {
+			doOnce.Do(closeTunnel)
+			lastFinish.Done() // can finish
+		}
 	}
 
 	// accept new user and alloc uid and start send loop
 	for {
+		// Have no timeout. Just block.
+		concurrency.Acquire(context.Background(), 1)
+		if finiteServeCount {
+			// All users have been come.
+			if !comming.TryAcquire(1) {
+				lastFinish.Wait() // wait last user finish
+				break
+			}
+		}
 		conn, err := listener.Accept()
 		if err != nil {
 			break
@@ -359,9 +407,6 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		}
 	}
 	doOnce.Do(closeTunnel)
-
-	// Drain out the sending buffer. The Tunnel can be destroy now.
-	time.Sleep(time.Millisecond * 10)
 }
 
 func (s *ProxyLiteServer) logProtocolMessage(source, header string, req, rsp interface{}) {

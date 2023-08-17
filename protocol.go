@@ -27,20 +27,28 @@ type AskFreePortReq struct{}
 
 // AskFreePortRsp Ask avaliable free ports response
 type AskFreePortRsp struct {
-	Ports []int
+	Ports []uint32
 }
 
 // RegisterInfo Register information
 type RegisterInfo struct {
-	OuterPort int
+	OuterPort uint32
 	InnerAddr string
 	Name      string
 	Message   string
 }
 
+// ControlInfo Register Controlling information
+type ControlInfo struct {
+	MaxServeTime uint32
+	MaxServeConn uint32
+	MaxServeCount uint32
+}
+
 // RegisterServiceReq inner service registration request
 type RegisterServiceReq struct {
 	Info RegisterInfo
+	Ctrl ControlInfo
 }
 
 const (
@@ -52,7 +60,7 @@ const (
 
 // RegisterServiceRsp inner service registration response
 type RegisterServiceRsp struct {
-	Code int
+	Code int32
 }
 
 // AskServiceReq Service discovery request
@@ -62,7 +70,7 @@ type AskServiceReq struct {
 
 // ServiceInfo Service basic information
 type ServiceInfo struct {
-	Port    int
+	Port    uint32
 	Name    string
 	Message string
 	Busy    bool
