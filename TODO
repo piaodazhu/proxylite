@@ -1,6 +1,6 @@
 - [ ] Hook API
-- [ ] Unit Tests
+- [x] Unit Tests
 - [ ] Code Report
 - [ ] Benchmark
-- [ ] Register arguments: maxConn, maxServeNum, maxServeTime
+- [x] Register arguments: maxConn, maxServeNum, maxServeTime
 - [ ] Active user status
