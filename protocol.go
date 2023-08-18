@@ -22,10 +22,10 @@ const (
 	TypeDataSegment = 64
 )
 
-// AskFreePortReq Ask avaliable free ports request
+// AskFreePortReq Ask available free ports request
 type AskFreePortReq struct{}
 
-// AskFreePortRsp Ask avaliable free ports response
+// AskFreePortRsp Ask available free ports response
 type AskFreePortRsp struct {
 	Ports []uint32
 }

@@ -11,7 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// RegisterEntry entry to discribe a single service registration
+// RegisterEntry entry to describe a single service registration
 type RegisterEntry struct {
 	// Basic Info
 	Info RegisterInfo
@@ -28,7 +28,7 @@ type ProxyLiteClient struct {
 	ready          bool
 	serverAddr     string
 	lock           sync.RWMutex
-	avaliablePorts map[uint32]struct{}
+	availablePorts map[uint32]struct{}
 	registered     map[uint32]*RegisterEntry
 	logger         *log.Logger
 }
@@ -38,7 +38,7 @@ func NewProxyLiteClient(serverAddr string) *ProxyLiteClient {
 	client := &ProxyLiteClient{
 		ready:          false,
 		serverAddr:     serverAddr,
-		avaliablePorts: map[uint32]struct{}{},
+		availablePorts: map[uint32]struct{}{},
 		registered:     map[uint32]*RegisterEntry{},
 		logger:         log.New(),
 	}
@@ -50,13 +50,13 @@ func NewProxyLiteClient(serverAddr string) *ProxyLiteClient {
 	}
 	client.ready = true
 	for _, port := range ports {
-		client.avaliablePorts[port] = struct{}{}
+		client.availablePorts[port] = struct{}{}
 	}
 	return client
 }
 
-// AvaliablePorts Get avaliable ports from proxy server.
-func (c *ProxyLiteClient) AvaliablePorts() ([]uint32, bool) {
+// availablePorts Get available ports from proxy server.
+func (c *ProxyLiteClient) AvailablePorts() ([]uint32, bool) {
 	ports, err := AskFreePort(c.serverAddr)
 	if err != nil {
 		c.ready = false
@@ -64,26 +64,26 @@ func (c *ProxyLiteClient) AvaliablePorts() ([]uint32, bool) {
 	}
 	c.ready = true
 	for _, port := range ports {
-		c.avaliablePorts[port] = struct{}{}
+		c.availablePorts[port] = struct{}{}
 	}
 	return ports, true
 }
 
-// AnyPort Get a random avaliable port from proxy server.
+// AnyPort Get a random available port from proxy server.
 func (c *ProxyLiteClient) AnyPort() (uint32, bool) {
 	if c.ready {
-		for port := range c.avaliablePorts {
+		for port := range c.availablePorts {
 			return port, true
 		}
 		return 0, false
 	}
 
-	_, ok := c.AvaliablePorts()
+	_, ok := c.AvailablePorts()
 	if !ok {
 		return 0, false
 	}
 
-	for port := range c.avaliablePorts {
+	for port := range c.availablePorts {
 		return port, true
 	}
 	return 0, false
@@ -187,7 +187,7 @@ func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo, ctrl ControlIn
 		for !serviceEnd {
 			if inner == nil {
 				// no inner service. send user close
-				c.logTunnelMessage(info.Name, "NOSRV", fmt.Sprintf("service not avaliable, uid[%d] [%v]", uid, err))
+				c.logTunnelMessage(info.Name, "NOSRV", fmt.Sprintf("service not available, uid[%d] [%v]", uid, err))
 				n = 0
 				writeUidWithCloseUnsafe(buf[8:], uid)
 				serviceEnd = true
@@ -296,7 +296,7 @@ func (c *ProxyLiteClient) logTunnelMessage(service, header, msg string) {
 	c.logger.Infof("[%s] [%s] %s", service, header, msg)
 }
 
-// AskFreePort Ask avaliable free port from proxy server with given address.
+// AskFreePort Ask available free port from proxy server with given address.
 func AskFreePort(addr string) ([]uint32, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {

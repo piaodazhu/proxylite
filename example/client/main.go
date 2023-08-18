@@ -9,7 +9,7 @@ import (
 
 func main() {
 	client := proxylite.NewProxyLiteClient(":9933")
-	log.Print(client.AvaliablePorts())
+	log.Print(client.AvailablePorts())
 	log.Print(client.ActiveServices())
 	log.Print(client.AnyPort())
 	log.Print(client.AnyPort())
@@ -23,13 +23,13 @@ func main() {
 			Message:   "redis kv",
 		},
 		proxylite.ControlInfo{
-			MaxServeConn: 2,
+			MaxServeConn:  2,
 			MaxServeCount: 4,
-			MaxServeTime: 600,
+			MaxServeTime:  600,
 		},
 	))
 
-	log.Print(client.AvaliablePorts())
+	log.Print(client.AvailablePorts())
 	log.Print(client.ActiveServices())
 	log.Print(client.GetRegisterEntryByPort(9931))
 	log.Print(client.GetRegisterEntryByName("redis"))
@@ -41,7 +41,7 @@ func main() {
 	}
 	<-entry.Done
 	time.Sleep(time.Microsecond * 10)
-	log.Print(client.AvaliablePorts())
+	log.Print(client.AvailablePorts())
 	log.Print(client.ActiveServices())
 	log.Print(client.GetRegisterEntryByPort(9931))
 	log.Print(client.GetRegisterEntryByName("redis"))
