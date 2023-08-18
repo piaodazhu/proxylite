@@ -34,7 +34,7 @@ type ProxyLiteServer struct {
 	logger *log.Logger
 }
 
-// NewProxyLiteServer Create a Proxy server with avaliable ports intervals.
+// NewProxyLiteServer Create a Proxy server with available ports intervals.
 func NewProxyLiteServer(portIntervals ...[2]int) *ProxyLiteServer {
 	server := &ProxyLiteServer{
 		all:    map[uint32]struct{}{},
@@ -48,7 +48,7 @@ func NewProxyLiteServer(portIntervals ...[2]int) *ProxyLiteServer {
 	return server
 }
 
-// AddPort Add avaliable ports intervals for server. Return false if port is invalid.
+// AddPort Add available ports intervals for server. Return false if port is invalid.
 func (s *ProxyLiteServer) AddPort(from, to int) bool {
 	if from <= 0 || to > 65535 {
 		return false
@@ -296,12 +296,12 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 	}
 
 	// if MaxServeCount is set not zero, only serve MaxServeCount users.
-	var comming, leaving *sem.Weighted
+	var coming, leaving *sem.Weighted
 	var finiteServeCount bool = false
 	lastFinish := sync.WaitGroup{}
 	if tn.ctrl.MaxServeCount > 0 {
 		finiteServeCount = true
-		comming = sem.NewWeighted(int64(tn.ctrl.MaxServeCount))
+		coming = sem.NewWeighted(int64(tn.ctrl.MaxServeCount))
 		leaving = sem.NewWeighted(int64(tn.ctrl.MaxServeCount) - 1) // last one leave, close tunnel
 		lastFinish.Add(1)
 	}
@@ -417,7 +417,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		}
 		if finiteServeCount {
 			// All users have been come.
-			if !comming.TryAcquire(1) {
+			if !coming.TryAcquire(1) {
 				lastFinish.Wait() // wait last user finish
 				break
 			}

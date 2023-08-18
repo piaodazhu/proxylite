@@ -16,8 +16,8 @@
 
 那为什么不编写一个包来使这变得更加优雅呢？proxylite 应运而生。它的主要特点如下：
 1. 易于集成到代码中。提供了服务器和客户端结构。只需导入此包，然后在需要时注册隧道。
-2. 动态按需反向代理，带有在线用户数量控制。
-3. 服务注册和发现。
+2. 动态按需反向代理，带有丰富的服务控制(在线用户数量，总服务次数，失效时间)。
+3. 服务发现和服务状态呈现。
 4. 支持自定义钩子。（开发中）
 
 ## 概念
@@ -126,7 +126,7 @@ func NewProxyLiteClient(serverAddr string) *ProxyLiteClient
 创建一个与代理服务器绑定的内部客户端。
 
 ```golang
-func (c *ProxyLiteClient) AvaliablePorts() ([]int, bool)
+func (c *ProxyLiteClient) AvailablePorts() ([]int, bool)
 ```
 从代理服务器获取可用端口。
 

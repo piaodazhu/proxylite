@@ -22,7 +22,7 @@ func readn(c net.Conn, n int) ([]byte, error) {
 	return buf, nil
 }
 
-func writen(c net.Conn, data []byte, n int) error {
+func written(c net.Conn, data []byte, n int) error {
 	offset := 0
 
 	for offset < n {
@@ -48,7 +48,7 @@ func newTcpEchoServer(addr string, pken int) error {
 			if err != nil {
 				break
 			}
-			err = writen(c, data, pken)
+			err = written(c, data, pken)
 			if err != nil {
 				break
 			}
@@ -113,7 +113,7 @@ func TestBasicUsage(t *testing.T) {
 	msg := "hello123"
 	var data []byte
 	for i := 0; i < 10; i++ {
-		err := writen(user, []byte(msg), 8)
+		err := written(user, []byte(msg), 8)
 		if err != nil {
 			t.Error("write 1, ", err)
 		}
@@ -174,7 +174,7 @@ func TestCancel(t *testing.T) {
 	msg := "hello123"
 	var data []byte
 	for i := 0; i < 10; i++ {
-		err := writen(user, []byte(msg), 8)
+		err := written(user, []byte(msg), 8)
 		if err != nil {
 			t.Error("write 1, ", err)
 		}
@@ -240,7 +240,7 @@ func TestMultiplex(t *testing.T) {
 			t.Logf("user[%d] is %s\n", i, user.LocalAddr().String())
 			var data []byte
 			for j := 0; j < 10; j++ {
-				err := writen(user, []byte(msg), 8)
+				err := written(user, []byte(msg), 8)
 				if err != nil {
 					emsg := fmt.Sprintf("[%d][%d]write 1: %v", i, j, err)
 					errmsg <- emsg
@@ -320,7 +320,7 @@ func TestMultiplexMaxTimeControl(t *testing.T) {
 			t.Logf("user[%d] is %s\n", i, user.LocalAddr().String())
 			var data []byte
 			for j := 0; j < 10; j++ {
-				err := writen(user, []byte(msg), 8)
+				err := written(user, []byte(msg), 8)
 				if err != nil {
 					emsg := fmt.Sprintf("[%d][%d]write 1: %v", i, j, err)
 					errmsg <- emsg
@@ -395,7 +395,7 @@ func TestMultiplexMaxCountControl(t *testing.T) {
 			msg := fmt.Sprintf("[%d]hello", i)
 			var data []byte
 			for j := 0; j < 10; j++ {
-				err := writen(user, []byte(msg), 8)
+				err := written(user, []byte(msg), 8)
 				if err != nil {
 					emsg := fmt.Sprintf("[%d][%d]write 1: %v", i, j, err)
 					errmsg <- emsg
@@ -475,7 +475,7 @@ func TestMultiplexMaxConnControl(t *testing.T) {
 			t.Logf("user[%d] is %s\n", i, user.LocalAddr().String())
 			var data []byte
 			for j := 0; j < 10; j++ {
-				err := writen(user, []byte(msg), 8)
+				err := written(user, []byte(msg), 8)
 				if err != nil {
 					emsg := fmt.Sprintf("[%d][%d]write 1: %v", i, j, err)
 					errmsg <- emsg

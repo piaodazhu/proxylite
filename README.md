@@ -13,8 +13,8 @@ One day, I needed to add TCP NAT traversal to [my project](https://github.com/pi
 
 So why not write a package to make this more elegant? proxylite was born. Its main features are listed below:
 1. Easy to integrate into code. Both server and client structures are provided. Just import this package then register tunnels whenever you want.
-2. Dynamic on-demand reverse proxy with online user number control.
-3. Service registration and discovery.
+2. Dynamic on-demand reverse proxy with serivce controlling (maxOnline, maxServe and deadline).
+3. Service discovery and status display.
 4. Customized hooks are support. (Under development)
 
 ## Concepts 
@@ -44,7 +44,7 @@ func main() {
 }
 ```
 
-These code create a proxylite server, and add avaliable outer port 9930-9932 (Note that it is not 9930 and 9932, but from 9930 to 9932), then run the server. The server is blocked listening on port 9939, inner client will dial this port and server discovery also bind this port.
+These code create a proxylite server, and add available outer port 9930-9932 (Note that it is not 9930 and 9932, but from 9930 to 9932), then run the server. The server is blocked listening on port 9939, inner client will dial this port and server discovery also bind this port.
 
 Then, we create a inner client:
 ```golang
@@ -98,12 +98,12 @@ Then we get the registration entry if the registration is success. Finally we wa
 ```golang
 func NewProxyLiteServer(portIntervals ...[2]int) *ProxyLiteServer
 ```
-Create a Proxy server with avaliable ports intervals.
+Create a Proxy server with available ports intervals.
 
 ```golang
 func (s *ProxyLiteServer) AddPort(from, to int) bool
 ```
-Create a Proxy server with avaliable ports intervals. Return false if port is invalid.
+Create a Proxy server with available ports intervals. Return false if port is invalid.
 
 ```golang
 func (s *ProxyLiteServer) SetLogger(logger *log.Logger)
@@ -123,14 +123,14 @@ func NewProxyLiteClient(serverAddr string) *ProxyLiteClient
 Create a inner client binding with a proxy server.
 
 ```golang
-func (c *ProxyLiteClient) AvaliablePorts() ([]int, bool)
+func (c *ProxyLiteClient) AvailablePorts() ([]int, bool)
 ```
-Get avaliable ports from proxy server.
+Get available ports from proxy server.
 
 ```golang
 func (c *ProxyLiteClient) AnyPort() (int, bool)
 ```
-Get a random avaliable port from proxy server.
+Get a random available port from proxy server.
 
 ```golang
 type ServiceInfo struct {
@@ -183,7 +183,7 @@ Set customized logrus logger for the inner client.
 ```golang
 func AskFreePort(addr string) ([]int, error)
 ```
-Ask avaliable free port from proxy server with given address.
+Ask available free port from proxy server with given address.
 
 
 ```golang
