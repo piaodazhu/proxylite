@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -16,12 +17,13 @@ import (
 )
 
 type tunnel struct {
-	empty     bool
-	busy      bool
-	birth     time.Time
+	empty bool
+	// busy  bool
+	// birth     time.Time
 	innerConn *net.Conn
-	info      *RegisterInfo
-	ctrl      *ControlInfo
+	// info      *RegisterInfo
+	service *ServiceInfo
+	ctrl    *ControlInfo
 }
 
 // ProxyLiteServer Public server that forwards traffic between user and inner client.
@@ -150,15 +152,9 @@ func (s *ProxyLiteServer) handleAskService(conn net.Conn, req *AskServiceReq) er
 
 	for _, t := range s.used {
 		if !t.empty &&
-			len(t.info.Name) >= len(req.Prefix) &&
-			t.info.Name[:len(req.Prefix)] == req.Prefix {
-			Services = append(Services, ServiceInfo{
-				Port:    t.info.OuterPort,
-				Name:    t.info.Name,
-				Message: t.info.Message,
-				Busy:    t.busy,
-				Birth:   t.birth,
-			})
+			len(t.service.Name) >= len(req.Prefix) &&
+			t.service.Name[:len(req.Prefix)] == req.Prefix {
+			Services = append(Services, *t.service)
 		}
 	}
 	s.lock.RUnlock()
@@ -186,22 +182,41 @@ func (s *ProxyLiteServer) handleRegisterService(conn net.Conn, req *RegisterServ
 	if !found {
 		tn = &tunnel{
 			empty:     false,
-			busy:      false,
-			birth:     time.Now(),
 			innerConn: &conn,
-			info:      &req.Info,
 			ctrl:      &req.Ctrl,
 		}
 		s.used[req.Info.OuterPort] = tn
 	} else if tn.empty { // reuse
 		tn.empty = false
-		tn.busy = false
-		tn.birth = time.Now()
 		tn.innerConn = &conn
-		tn.info = &req.Info
 		tn.ctrl = &req.Ctrl
 	} else {
 		return s.registerServiceResponse(conn, req, RegisterRspPortOccupied)
+	}
+
+	tn.service = &ServiceInfo{
+		Port:    req.Info.OuterPort,
+		Name:    req.Info.Name,
+		Message: req.Info.Message,
+		Birth:   time.Now(),
+	}
+
+	if req.Ctrl.MaxServeConn != 0 {
+		tn.service.Capacity = req.Ctrl.MaxServeConn
+	} else {
+		tn.service.Capacity = 10000
+	}
+
+	if req.Ctrl.MaxServeCount != 0 {
+		tn.service.TotalServe = req.Ctrl.MaxServeCount
+	} else {
+		tn.service.TotalServe = 100000
+	}
+
+	if req.Ctrl.MaxServeTime != 0 {
+		tn.service.DeadLine = time.Now().Add(time.Second * time.Duration(req.Ctrl.MaxServeTime))
+	} else {
+		tn.service.DeadLine = time.Now().Add(time.Hour * 24 * 7 * 365)
 	}
 
 	s.registerServiceResponse(conn, req, RegisterRspOK)
@@ -247,10 +262,10 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 	var totalOut, totalIn uint64
 
 	// Now, register is OK, we want to map outer port to the inner client's socket
-	s.logTunnelMessage(tn.info.Name, "REGISTER", fmt.Sprintf("New inner client register port %d ok. Listening for outer client...", tn.info.OuterPort))
+	s.logTunnelMessage(tn.service.Name, "REGISTER", fmt.Sprintf("New inner client register port %d ok. Listening for outer client...", tn.service.Port))
 
 	// First, listen on registered outer port.
-	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", tn.info.OuterPort))
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", tn.service.Port))
 	if err != nil {
 		(*tn.innerConn).Close()
 		return
@@ -261,7 +276,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		(*tn.innerConn).Close()
 		listener.Close()
 		binder.closeAll()
-		s.logTunnelMessage(tn.info.Name, "CLOSE", fmt.Sprintf("tunnel closed, port=%d, Out %dB, In %dB", tn.info.OuterPort, totalOut, totalIn))
+		s.logTunnelMessage(tn.service.Name, "CLOSE", fmt.Sprintf("tunnel closed, port=%d, Out %dB, In %dB", tn.service.Port, totalOut, totalIn))
 	}
 
 	// if MaxServeTime is set, close all conn after MaxServeTime s
@@ -294,7 +309,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 	// make sure tunnel closed and tn set empty before this function return
 	defer func() {
 		if err := recover(); err != nil {
-			s.logTunnelMessage(tn.info.Name, "PANIC", fmt.Sprint("tunnel panic, err=", err))
+			s.logTunnelMessage(tn.service.Name, "PANIC", fmt.Sprint("tunnel panic, err=", err))
 		}
 		if timeoutTimer != nil && !timeoutTimer.Stop() {
 			select { // timer may not be triggered. If so we drain it out.
@@ -374,7 +389,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		}
 		if binder.freeUidIfExists(GenConnId(&outerConn)) {
 			outerConn.Close()
-			s.logTunnelMessage(tn.info.Name, "FINISH", fmt.Sprintf("in->out finish: %v, [%v]", outerConn.RemoteAddr(), err))
+			s.logTunnelMessage(tn.service.Name, "FINISH", fmt.Sprintf("in->out finish: %v, [%v]", outerConn.RemoteAddr(), err))
 		}
 		concurrency.Release(1)
 		// if MaxServeCount is defined and the last one user leave
@@ -382,12 +397,24 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 			doOnce.Do(closeTunnel)
 			lastFinish.Done() // can finish
 		}
+		atomic.AddUint32(&tn.service.Online, ^uint32(0)) // sub 1
 	}
 
 	// accept new user and alloc uid and start send loop
 	for {
-		// Have no timeout. Just block.
-		concurrency.Acquire(context.Background(), 1)
+		// concurrent control
+		if !concurrency.TryAcquire(1) {
+			// if online user count reach maxConn, step into this branch
+			// we close listener to 'reject' unexpected users
+			listener.Close()
+			// Then block until at lease one user finish his session.
+			concurrency.Acquire(context.Background(), 1)
+			// Then we recover the listener
+			listener, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", tn.service.Port))
+			if err != nil {
+				break
+			}
+		}
 		if finiteServeCount {
 			// All users have been come.
 			if !comming.TryAcquire(1) {
@@ -401,6 +428,8 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		}
 		connId := GenConnId(&conn)
 		if uid, ok := binder.allocUid(connId, &conn); ok {
+			atomic.AddUint32(&tn.service.AlreadyServe, 1)
+			atomic.AddUint32(&tn.service.Online, 1)
 			go readFromUser(conn, connId, uid)
 		} else {
 			conn.Close()

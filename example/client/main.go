@@ -22,7 +22,11 @@ func main() {
 			Name:      "redis",
 			Message:   "redis kv",
 		},
-		proxylite.ControlInfo{},
+		proxylite.ControlInfo{
+			MaxServeConn: 2,
+			MaxServeCount: 4,
+			MaxServeTime: 600,
+		},
 	))
 
 	log.Print(client.AvaliablePorts())
