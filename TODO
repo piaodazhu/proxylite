@@ -3,4 +3,4 @@
 - [ ] Code Report
 - [ ] Benchmark
 - [x] Register arguments: maxConn, maxServeNum, maxServeTime
-- [ ] Active user status
+- [x] Active user status

@@ -40,8 +40,8 @@ type RegisterInfo struct {
 
 // ControlInfo Register Controlling information
 type ControlInfo struct {
-	MaxServeTime uint32
-	MaxServeConn uint32
+	MaxServeTime  uint32
+	MaxServeConn  uint32
 	MaxServeCount uint32
 }
 
@@ -73,8 +73,13 @@ type ServiceInfo struct {
 	Port    uint32
 	Name    string
 	Message string
-	Busy    bool
 	Birth   time.Time
+
+	Online       uint32    // online user count
+	Capacity     uint32    // max concurrency user count
+	AlreadyServe uint32    // already served user number
+	TotalServe   uint32    // total user number can serve
+	DeadLine     time.Time // time to close this port
 }
 
 // AskServiceRsp Service discovery response
