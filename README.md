@@ -1,3 +1,7 @@
+[![Go Reference](https://pkg.go.dev/badge/github.com/piaodazhu/proxylite.svg)](https://pkg.go.dev/github.com/piaodazhu/proxylite)
+[![Go Report Card](https://goreportcard.com/badge/github.com/piaodazhu/proxylite)](https://goreportcard.com/report/github.com/piaodazhu/proxylite)
+<!-- [![codecov](https://codecov.io/gh/piaodazhu/proxylite/branch/master/graph/badge.svg?token=KMOWEKDPN5)](https://codecov.io/gh/piaodazhu/proxylite) -->
+
 [English](./README.md)|[中文](./README_ZH.md)
 ## proxylite
 `proxylite` is a dynamic TCP reverse proxy Golang package for NAT or firewall traversal. It is god damn easy to integrate network traversal feature into your project with proxylite. 

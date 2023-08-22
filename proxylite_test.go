@@ -508,3 +508,102 @@ func TestMultiplexMaxConnControl(t *testing.T) {
 		t.Error("count control error")
 	}
 }
+
+func TestSetHook(t *testing.T) {
+
+	logger := logrus.New()
+	logger.Level = logrus.FatalLevel
+
+	proxyServer := NewProxyLiteServer()
+	proxyServer.SetLogger(logger)
+	proxyServer.AddPort(9968, 9968)
+
+	trace := ""
+	proxyServer.OnTunnelCreated(func(ctx *Context) {
+		ctx.PutValue("key1", "v1")
+		trace += "1"
+	})
+	proxyServer.OnTunnelDestroyed(func(ctx *Context) {
+		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
+			panic("kvs doesn't work")
+		}
+		trace += "2"
+	})
+	proxyServer.OnUserComming(func(ctx *Context) {
+		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
+			panic("kvs doesn't work")
+		}
+		trace += "3"
+	})
+	proxyServer.OnUserLeaving(func(ctx *Context) {
+		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
+			panic("kvs doesn't work")
+		}
+		trace += "4"
+	})
+	proxyServer.OnForwardTunnelToUser(func(ctx *Context) {
+		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
+			panic("kvs doesn't work")
+		}
+		trace += "5"
+	})
+	proxyServer.OnForwardUserToTunnel(func(ctx *Context) {
+		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
+			panic("kvs doesn't work")
+		}
+		trace += "6"
+	})
+
+	go func() {
+		proxyServer.Run(":9967")
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	innerClient := NewProxyLiteClient(":9967")
+	innerClient.SetLogger(logger)
+	cancelFunc, done, err := innerClient.RegisterInnerService(
+		RegisterInfo{
+			OuterPort: 9968,
+			InnerAddr: ":9966",
+			Name:      "Echo",
+			Message:   "TCP Echo Server",
+		},
+		ControlInfo{},
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		cancelFunc()
+		<-done
+		fmt.Println(trace)
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	user, err := net.Dial("tcp", ":9968")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := "hello123"
+	var data []byte
+	for i := 0; i < 10; i++ {
+		err := written(user, []byte(msg), 8)
+		if err != nil {
+			t.Error("write 1, ", err)
+		}
+		data, err = readn(user, 8)
+		if err != nil {
+			t.Error("read 1, ", err)
+		}
+		if string(data) != msg {
+			t.Error("read 3, ", string(data))
+		}
+	}
+	user.Close()
+	time.Sleep(time.Millisecond * 100)
+	select {
+	case <-done:
+		t.Error("unexpected quit")
+	default:
+	}
+}

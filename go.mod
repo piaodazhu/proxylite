@@ -1,6 +1,6 @@
 module github.com/piaodazhu/proxylite
 
-go 1.12
+go 1.16
 
 require (
 	github.com/cespare/xxhash/v2 v2.2.0
