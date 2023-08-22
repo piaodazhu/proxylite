@@ -1,6 +1,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/piaodazhu/proxylite.svg)](https://pkg.go.dev/github.com/piaodazhu/proxylite)
 [![Go Report Card](https://goreportcard.com/badge/github.com/piaodazhu/proxylite)](https://goreportcard.com/report/github.com/piaodazhu/proxylite)
-<!-- [![codecov](https://codecov.io/gh/piaodazhu/proxylite/branch/master/graph/badge.svg?token=KMOWEKDPN5)](https://codecov.io/gh/piaodazhu/proxylite) -->
+[![codecov](https://codecov.io/gh/piaodazhu/proxylite/graph/badge.svg?token=WdqA7lKG0C)](https://codecov.io/gh/piaodazhu/proxylite)
 
 [English](./README.md)|[中文](./README_ZH.md)
 ## proxylite
