@@ -17,13 +17,10 @@ import (
 )
 
 type tunnel struct {
-	empty bool
-	// busy  bool
-	// birth     time.Time
+	empty     bool
 	innerConn *net.Conn
-	// info      *RegisterInfo
-	service *ServiceInfo
-	ctrl    *ControlInfo
+	service   *ServiceInfo
+	ctrl      *ControlInfo
 }
 
 // ProxyLiteServer Public server that forwards traffic between user and inner client.
@@ -32,6 +29,13 @@ type ProxyLiteServer struct {
 	lock   sync.RWMutex
 	used   map[uint32]*tunnel
 	logger *log.Logger
+
+	onTunnelCreated       HookFunc
+	onTunnelDestroyed     HookFunc
+	onUserComming         HookFunc
+	onUserLeaving         HookFunc
+	onForwardUserToTunnel HookFunc
+	onForwardTunnelToUser HookFunc
 }
 
 // NewProxyLiteServer Create a Proxy server with available ports intervals.
@@ -260,6 +264,10 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 	doOnce := sync.Once{}
 	binder := newConnUidBinder(0)
 	var totalOut, totalIn uint64
+	kvs := &sync.Map{}
+
+	s.onTunnelCreated.Trigger(makeContext(tn, nil, nil, kvs))
+	defer s.onTunnelDestroyed.Trigger(makeContext(tn, nil, nil, kvs))
 
 	// Now, register is OK, we want to map outer port to the inner client's socket
 	s.logTunnelMessage(tn.service.Name, "REGISTER", fmt.Sprintf("New inner client register port %d ok. Listening for outer client...", tn.service.Port))
@@ -350,6 +358,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 
 			// forward to the write user. (don't send 4 byte uid)
 			// here can be optimized by goroutines
+			s.onForwardTunnelToUser.Trigger(makeContext(tn, outerConn, data[8:], kvs))
 			n, err = (*outerConn).Write(data[8:])
 			if err != nil {
 				// how to send close thougth tunnel?
@@ -370,6 +379,9 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 		var err error
 		var userEnd bool = false
 
+		s.onUserComming.Trigger(makeContext(tn, &outerConn, nil, kvs))
+		defer s.onUserLeaving.Trigger(makeContext(tn, &outerConn, nil, kvs))
+
 		for !userEnd {
 			n, err = outerConn.Read(buf[16:]) // type(4) + length(4) + uid(4) + close(4)
 			if err != nil {
@@ -380,6 +392,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 				writeUidUnsafe(buf[8:], uid)
 			}
 
+			s.onForwardUserToTunnel.Trigger(makeContext(tn, &outerConn, buf[8:n+8], kvs))
 			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+8) // + uid(4) + close(4)
 			if err != nil {
 				// end this tunnel
@@ -444,4 +457,28 @@ func (s *ProxyLiteServer) logProtocolMessage(source, header string, req, rsp int
 
 func (s *ProxyLiteServer) logTunnelMessage(service, header, msg string) {
 	s.logger.Infof("[%s] [%s] %s", service, header, msg)
+}
+
+func (s *ProxyLiteServer) OnTunnelCreated(f HookFunc) {
+	s.onTunnelCreated = f
+}
+
+func (s *ProxyLiteServer) OnTunnelDestroyed(f HookFunc) {
+	s.onTunnelDestroyed = f
+}
+
+func (s *ProxyLiteServer) OnUserComming(f HookFunc) {
+	s.onUserComming = f
+}
+
+func (s *ProxyLiteServer) OnUserLeaving(f HookFunc) {
+	s.onUserLeaving = f
+}
+
+func (s *ProxyLiteServer) OnForwardTunnelToUser(f HookFunc) {
+	s.onForwardTunnelToUser = f
+}
+
+func (s *ProxyLiteServer) OnForwardUserToTunnel(f HookFunc) {
+	s.onForwardUserToTunnel = f
 }
