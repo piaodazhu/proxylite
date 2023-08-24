@@ -22,7 +22,7 @@
 1. 易于集成到代码中。提供了服务器和客户端结构。只需导入此包，然后在需要时注册隧道。
 2. 动态按需反向代理，带有丰富的服务控制(在线用户数量，总服务次数，失效时间)。
 3. 服务发现和服务状态呈现。
-4. 支持自定义钩子。（开发中）
+4. 支持自定义钩子。
 
 ## 概念
 ```
@@ -67,11 +67,16 @@ func main() {
     client := proxylite.NewProxyLiteClient("0.0.0.0:9933")
     err := client.RegisterInnerService(
         proxylite.RegisterInfo{
-            OuterPort: 9931,
+            OuterPort: 9931,     // 映射ssh服务到 服务器IP:9931
             InnerAddr: ":22",
             Name:      "ssh",
-            Message:   "ssh 登录",
+            Message:   "ssh login",
         },
+        proxylite.ControlInfo{
+			MaxServeConn:  3,     // 同时3个用户
+			MaxServeCount: 1000,  // 1000次服务后关闭
+			MaxServeTime:  600,   // 10分钟后关闭
+		},
     )
     if err != nil {
         log.Fatal(err)
@@ -141,11 +146,16 @@ func (c *ProxyLiteClient) AnyPort() (int, bool)
 
 ```golang
 type ServiceInfo struct {
-    Port    int
-    Name    string
-    Message string
-    Busy    bool
-    Birth   time.Time
+	Port    uint32
+	Name    string
+	Message string
+	Birth   time.Time      // 创建时间
+
+	Online       uint32    // 在线用户数量
+	Capacity     uint32    // 在线用户容量
+	AlreadyServe uint32    // 已服务用户数
+	TotalServe   uint32    // 总服务用户数
+	DeadLine     time.Time // 预计关闭时间
 }
 
 func (c *ProxyLiteClient) ActiveServices() ([]ServiceInfo, error)
@@ -160,7 +170,14 @@ type RegisterInfo struct {
     Message   string
 }
 
-func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error
+type ControlInfo struct {
+	MaxServeTime  uint32
+	MaxServeConn  uint32
+	MaxServeCount uint32
+}
+
+func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo, 
+    ctrl ControlInfo) (func(), chan struct{}, error)
 ```
 将内
 

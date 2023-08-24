@@ -25,10 +25,11 @@ type tunnel struct {
 
 // ProxyLiteServer Public server that forwards traffic between user and inner client.
 type ProxyLiteServer struct {
-	all    map[uint32]struct{}
-	lock   sync.RWMutex
-	used   map[uint32]*tunnel
-	logger *log.Logger
+	all      map[uint32]struct{}
+	lock     sync.RWMutex
+	used     map[uint32]*tunnel
+	logger   *log.Logger
+	listener net.Listener
 
 	onTunnelCreated       HookFunc
 	onTunnelDestroyed     HookFunc
@@ -70,16 +71,17 @@ func (s *ProxyLiteServer) SetLogger(logger *log.Logger) {
 
 // Run Run the server and let it listen on given address.
 func (s *ProxyLiteServer) Run(addr string) error {
-	listener, err := net.Listen("tcp", addr)
+	var err error
+	s.listener, err = net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.logger.Info("Listening for new inner client, addr=", addr)
 	for {
-		conn, err := listener.Accept()
+		conn, err := s.listener.Accept()
 		if err != nil {
 			s.logger.Error(err)
-			continue
+			return nil
 		}
 
 		s.logger.Info("Accept new client: ", conn.RemoteAddr())
@@ -88,6 +90,11 @@ func (s *ProxyLiteServer) Run(addr string) error {
 			s.logger.Error(err)
 		}
 	}
+}
+
+// Stop Stop the server
+func (s *ProxyLiteServer) Stop() error {
+	return s.listener.Close()
 }
 
 func (s *ProxyLiteServer) serve(conn net.Conn) error {
@@ -392,7 +399,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 				writeUidUnsafe(buf[8:], uid)
 			}
 
-			s.onForwardUserToTunnel.Trigger(makeContext(tn, &outerConn, buf[8:n+8], kvs))
+			s.onForwardUserToTunnel.Trigger(makeContext(tn, &outerConn, buf[16:16+n], kvs))
 			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+8) // + uid(4) + close(4)
 			if err != nil {
 				// end this tunnel

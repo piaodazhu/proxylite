@@ -19,7 +19,7 @@ So why not write a package to make this more elegant? proxylite was born. Its ma
 1. Easy to integrate into code. Both server and client structures are provided. Just import this package then register tunnels whenever you want.
 2. Dynamic on-demand reverse proxy with serivce controlling (maxOnline, maxServe and deadline).
 3. Service discovery and status display.
-4. Customized hooks are support. (Under development)
+4. Customized hooks are support.
 
 ## Concepts 
 ```
@@ -44,7 +44,8 @@ import "github.com/piaodazhu/proxylite"
 func main() {
     server := proxylite.NewProxyLiteServer()
     server.AddPort(9930, 9932)
-    panic(server.Run(":9933"))
+
+    server.Run(":9933")
 }
 ```
 
@@ -64,11 +65,16 @@ func main() {
     client := proxylite.NewProxyLiteClient("0.0.0.0:9933")
     err := client.RegisterInnerService(
         proxylite.RegisterInfo{
-            OuterPort: 9931,
+            OuterPort: 9931,     // map ssh service to serverIp:9931
             InnerAddr: ":22",
             Name:      "ssh",
             Message:   "ssh login",
         },
+        proxylite.ControlInfo{
+			MaxServeConn:  3,     // 3 users at the same time
+			MaxServeCount: 1000,  // close after 1000 servings
+			MaxServeTime:  600,   // close after 10min
+		},
     )
     if err != nil {
         log.Fatal(err)
@@ -138,11 +144,16 @@ Get a random available port from proxy server.
 
 ```golang
 type ServiceInfo struct {
-    Port    int
-    Name    string
-    Message string
-    Busy    bool
-    Birth   time.Time
+	Port    uint32
+	Name    string
+	Message string
+	Birth   time.Time
+
+	Online       uint32    // online user count
+	Capacity     uint32    // max concurrency user count
+	AlreadyServe uint32    // already served user number
+	TotalServe   uint32    // total user number can serve
+	DeadLine     time.Time // time to close this port
 }
 
 func (c *ProxyLiteClient) ActiveServices() ([]ServiceInfo, error)
@@ -158,7 +169,14 @@ type RegisterInfo struct {
     Message   string
 }
 
-func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo) error
+type ControlInfo struct {
+	MaxServeTime  uint32
+	MaxServeConn  uint32
+	MaxServeCount uint32
+}
+
+func (c *ProxyLiteClient) RegisterInnerService(info RegisterInfo, 
+    ctrl ControlInfo) (func(), chan struct{}, error)
 ```
 Register inner server to proxy server's outer port.
 
