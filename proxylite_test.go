@@ -83,7 +83,9 @@ func TestBasicUsage(t *testing.T) {
 	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -104,6 +106,7 @@ func TestBasicUsage(t *testing.T) {
 	defer func() {
 		cancelFunc()
 		<-done
+		proxyServer.Stop()
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -144,7 +147,9 @@ func TestCancel(t *testing.T) {
 	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -165,6 +170,7 @@ func TestCancel(t *testing.T) {
 	defer func() {
 		cancelFunc()
 		<-done
+		proxyServer.Stop()
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -203,10 +209,12 @@ func TestMultiplex(t *testing.T) {
 	logger.Level = logrus.FatalLevel
 
 	proxyServer := NewProxyLiteServer()
-	// proxyServer.SetLogger(logger)
+	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -227,6 +235,7 @@ func TestMultiplex(t *testing.T) {
 	defer func() {
 		cancelFunc()
 		<-done
+		proxyServer.Stop()
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -281,10 +290,12 @@ func TestMultiplexMaxTimeControl(t *testing.T) {
 	logger.Level = logrus.FatalLevel
 
 	proxyServer := NewProxyLiteServer()
-	// proxyServer.SetLogger(logger)
+	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -307,6 +318,7 @@ func TestMultiplexMaxTimeControl(t *testing.T) {
 	defer func() {
 		cancelFunc()
 		<-done
+		proxyServer.Stop()
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -356,10 +368,12 @@ func TestMultiplexMaxCountControl(t *testing.T) {
 	logger.Level = logrus.FatalLevel
 
 	proxyServer := NewProxyLiteServer()
-	// proxyServer.SetLogger(logger)
+	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -382,6 +396,7 @@ func TestMultiplexMaxCountControl(t *testing.T) {
 	defer func() {
 		cancelFunc()
 		<-done
+		proxyServer.Stop()
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -435,10 +450,12 @@ func TestMultiplexMaxConnControl(t *testing.T) {
 	logger.Level = logrus.FatalLevel
 
 	proxyServer := NewProxyLiteServer()
-	// proxyServer.SetLogger(logger)
+	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -461,6 +478,7 @@ func TestMultiplexMaxConnControl(t *testing.T) {
 	defer func() {
 		cancelFunc()
 		<-done
+		proxyServer.Stop()
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -520,20 +538,16 @@ func TestSetHook(t *testing.T) {
 
 	trace := ""
 	proxyServer.OnTunnelCreated(func(ctx *Context) {
-		fmt.Println("OKOKOKOK")
 		ctx.PutValue("key1", "v1")
 		trace += "1"
-		fmt.Println("c1c1")
 	})
 	proxyServer.OnTunnelDestroyed(func(ctx *Context) {
-		fmt.Println("c2c2")
 		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
 			panic("kvs doesn't work")
 		}
 		trace += "2"
 	})
 	proxyServer.OnUserComming(func(ctx *Context) {
-		fmt.Println("c3c3")
 		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
 			panic("kvs doesn't work")
 		}
@@ -560,7 +574,9 @@ func TestSetHook(t *testing.T) {
 
 	go func() {
 		time.Sleep(time.Millisecond * 10)
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -582,6 +598,7 @@ func TestSetHook(t *testing.T) {
 		cancelFunc()
 		<-done
 		time.Sleep(time.Millisecond * 10) // wait close
+		proxyServer.Stop()
 		if trace != "1365656565656565656565642" {
 			fmt.Println(trace)
 			t.Error("hook does not work well")
@@ -667,7 +684,9 @@ func TestHookContext(t *testing.T) {
 	})
 
 	go func() {
-		panic(proxyServer.Run(":9967"))
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -689,6 +708,7 @@ func TestHookContext(t *testing.T) {
 		cancelFunc()
 		<-done
 		time.Sleep(time.Millisecond * 10) // wait close
+		proxyServer.Stop()
 		if trace != "EchoTCP Echo Server127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1" {
 			fmt.Println(trace)
 			t.Error("hook does not work well")
