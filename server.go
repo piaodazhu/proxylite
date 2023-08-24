@@ -392,7 +392,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 				writeUidUnsafe(buf[8:], uid)
 			}
 
-			s.onForwardUserToTunnel.Trigger(makeContext(tn, &outerConn, buf[8:n+8], kvs))
+			s.onForwardUserToTunnel.Trigger(makeContext(tn, &outerConn, buf[16:16+n], kvs))
 			err = sendMessageOnBuffer(*tn.innerConn, TypeDataSegment, buf, n+8) // + uid(4) + close(4)
 			if err != nil {
 				// end this tunnel

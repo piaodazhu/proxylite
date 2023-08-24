@@ -3,6 +3,7 @@ package proxylite
 import (
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +83,7 @@ func TestBasicUsage(t *testing.T) {
 	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		proxyServer.Run(":9967")
+		panic(proxyServer.Run(":9967"))
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -143,7 +144,7 @@ func TestCancel(t *testing.T) {
 	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		proxyServer.Run(":9967")
+		panic(proxyServer.Run(":9967"))
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -205,7 +206,7 @@ func TestMultiplex(t *testing.T) {
 	// proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		proxyServer.Run(":9967")
+		panic(proxyServer.Run(":9967"))
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -283,7 +284,7 @@ func TestMultiplexMaxTimeControl(t *testing.T) {
 	// proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		proxyServer.Run(":9967")
+		panic(proxyServer.Run(":9967"))
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -358,7 +359,7 @@ func TestMultiplexMaxCountControl(t *testing.T) {
 	// proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		proxyServer.Run(":9967")
+		panic(proxyServer.Run(":9967"))
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -437,7 +438,7 @@ func TestMultiplexMaxConnControl(t *testing.T) {
 	// proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
 	go func() {
-		proxyServer.Run(":9967")
+		panic(proxyServer.Run(":9967"))
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -510,7 +511,6 @@ func TestMultiplexMaxConnControl(t *testing.T) {
 }
 
 func TestSetHook(t *testing.T) {
-
 	logger := logrus.New()
 	logger.Level = logrus.FatalLevel
 
@@ -520,16 +520,20 @@ func TestSetHook(t *testing.T) {
 
 	trace := ""
 	proxyServer.OnTunnelCreated(func(ctx *Context) {
+		fmt.Println("OKOKOKOK")
 		ctx.PutValue("key1", "v1")
 		trace += "1"
+		fmt.Println("c1c1")
 	})
 	proxyServer.OnTunnelDestroyed(func(ctx *Context) {
+		fmt.Println("c2c2")
 		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
 			panic("kvs doesn't work")
 		}
 		trace += "2"
 	})
 	proxyServer.OnUserComming(func(ctx *Context) {
+		fmt.Println("c3c3")
 		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
 			panic("kvs doesn't work")
 		}
@@ -555,7 +559,8 @@ func TestSetHook(t *testing.T) {
 	})
 
 	go func() {
-		proxyServer.Run(":9967")
+		time.Sleep(time.Millisecond * 10)
+		panic(proxyServer.Run(":9967"))
 	}()
 	time.Sleep(time.Millisecond * 10)
 
@@ -576,7 +581,118 @@ func TestSetHook(t *testing.T) {
 	defer func() {
 		cancelFunc()
 		<-done
-		fmt.Println(trace)
+		time.Sleep(time.Millisecond * 10) // wait close
+		if trace != "1365656565656565656565642" {
+			fmt.Println(trace)
+			t.Error("hook does not work well")
+		}
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	user, err := net.Dial("tcp", ":9968")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := "hello123"
+	var data []byte
+	for i := 0; i < 10; i++ {
+		err := written(user, []byte(msg), 8)
+		if err != nil {
+			t.Error("write 1, ", err)
+		}
+		data, err = readn(user, 8)
+		if err != nil {
+			t.Error("read 1, ", err)
+		}
+		if string(data) != msg {
+			t.Error("read 3, ", string(data))
+		}
+	}
+	user.Close()
+	time.Sleep(time.Millisecond * 100)
+	select {
+	case <-done:
+		t.Error("unexpected quit")
+	default:
+	}
+}
+
+func TestHookContext(t *testing.T) {
+
+	logger := logrus.New()
+	logger.Level = logrus.FatalLevel
+
+	proxyServer := NewProxyLiteServer()
+	proxyServer.SetLogger(logger)
+	proxyServer.AddPort(9968, 9968)
+
+	trace := ""
+	proxyServer.OnTunnelCreated(func(ctx *Context) {
+		ctx.PutValue("key1", "v1")
+		if ctx.DataBuffer() != nil {
+			t.Error("data buf not nil")
+		}
+		sinfo := ctx.ServiceInfo()
+		trace += sinfo.Name + sinfo.Message
+	})
+
+	proxyServer.OnForwardTunnelToUser(func(ctx *Context) {
+		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
+			t.Error("getValue")
+		}
+		uraddr := ctx.UserRemoteAddress().String()
+		uladdr := ctx.UserLocalAddress().String()
+		ipPort1 := strings.Split(uraddr, ":")
+		ipPort2 := strings.Split(uladdr, ":")
+		trace += ipPort1[0] + ipPort2[0]
+
+		data := ctx.DataBuffer()
+		trace += string(data)
+	})
+	proxyServer.OnForwardUserToTunnel(func(ctx *Context) {
+		if v, ok := ctx.GetValue("key1"); !ok || v.(string) != "v1" {
+			panic("kvs doesn't work")
+		}
+		iraddr := ctx.InnerRemoteConn().String()
+		ipPort1 := strings.Split(iraddr, ":")
+		iladdr := ctx.InnerLocalConn().String()
+		ipPort2 := strings.Split(iladdr, ":")
+		if len(ipPort1) != 2 {
+			t.Error("cannot get inner local address")
+		}
+		trace += ipPort2[0]
+
+		data := ctx.DataBuffer()
+		trace += string(data)
+	})
+
+	go func() {
+		panic(proxyServer.Run(":9967"))
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	innerClient := NewProxyLiteClient(":9967")
+	innerClient.SetLogger(logger)
+	cancelFunc, done, err := innerClient.RegisterInnerService(
+		RegisterInfo{
+			OuterPort: 9968,
+			InnerAddr: ":9966",
+			Name:      "Echo",
+			Message:   "TCP Echo Server",
+		},
+		ControlInfo{},
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		cancelFunc()
+		<-done
+		time.Sleep(time.Millisecond * 10) // wait close
+		if trace != "EchoTCP Echo Server127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1hello123127.0.0.1127.0.0.1hello123127.0.0.1" {
+			fmt.Println(trace)
+			t.Error("hook does not work well")
+		}
 	}()
 	time.Sleep(time.Millisecond * 10)
 
