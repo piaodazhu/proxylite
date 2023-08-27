@@ -104,6 +104,10 @@ proxylite.RegisterInfo{
 ```
 然后，如果注册成功，我们获取注册条目。最后，我们通过读取通道等待注册完成。
 
+## frplite
+
+`./frplite/frpc`和`./frplite/frps`是两个类似于`frps`和`frpc`的可执行程序。他们可以像`frp`一样配置并运行，但是只支持tcp.
+
 ## 教程
 
 ### 服务器
