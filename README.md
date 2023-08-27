@@ -102,6 +102,10 @@ proxylite.RegisterInfo{
 ```
 Then we get the registration entry if the registration is success. Finally we wait it done by reading channel.
 
+## frplite
+
+`./frplite/frpc` and `./frplite/frps` are 2 executable programs like `frps` and `frpc`. They can be configured and run like `frp` but only support tcp.
+
 ## Tutorial
 
 ### Server
