@@ -1,7 +1,7 @@
 - [x] Hook API
 - [x] Unit Tests
 - [x] Code Report
-- [ ] Better Coverage
-- [ ] Benchmark
+- [x] Better Coverage
+- [x] Benchmark
 - [x] Register arguments: maxConn, maxServeNum, maxServeTime
 - [x] Active user status

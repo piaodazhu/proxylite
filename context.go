@@ -28,7 +28,7 @@ func makeContext(tn *tunnel, user *net.Conn, data []byte, kvMap *sync.Map) *Cont
 }
 
 func (ctx *Context) AbortTunnel() error {
-	if ctx.tn.innerConn == nil {
+	if ctx.tn == nil || ctx.tn.innerConn == nil {
 		return errors.New("cannot abort service because inner connection not exists")
 	}
 	return (*ctx.tn.innerConn).Close()

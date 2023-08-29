@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -62,11 +63,6 @@ func (s *ProxyLiteServer) AddPort(from, to int) bool {
 		s.all[uint32(p)] = struct{}{}
 	}
 	return true
-}
-
-// SetLogger Set customized logrus logger for the server.
-func (s *ProxyLiteServer) SetLogger(logger *log.Logger) {
-	s.logger = logger
 }
 
 // Run Run the server and let it listen on given address.
@@ -488,4 +484,14 @@ func (s *ProxyLiteServer) OnForwardTunnelToUser(f HookFunc) {
 
 func (s *ProxyLiteServer) OnForwardUserToTunnel(f HookFunc) {
 	s.onForwardUserToTunnel = f
+}
+
+// SetLogger Set customized logrus logger for the server.
+func (s *ProxyLiteServer) SetLogger(logger *log.Logger) {
+	if logger == nil {
+		s.logger = log.New()
+		s.logger.SetOutput(io.Discard)
+	} else {
+		s.logger = logger
+	}
 }

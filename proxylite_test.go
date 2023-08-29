@@ -75,13 +75,15 @@ func init() {
 }
 
 func TestBasicUsage(t *testing.T) {
-
 	logger := logrus.New()
 	logger.Level = logrus.FatalLevel
 
-	proxyServer := NewProxyLiteServer()
+	proxyServer := NewProxyLiteServer([2]int{9900, 9910})
 	proxyServer.SetLogger(logger)
 	proxyServer.AddPort(9968, 9968)
+	if proxyServer.AddPort(99968, 99968) == true {
+		t.Error("AddPort")
+	}
 	go func() {
 		if err := proxyServer.Run(":9967"); err != nil {
 			panic(err)
@@ -91,6 +93,16 @@ func TestBasicUsage(t *testing.T) {
 
 	innerClient := NewProxyLiteClient(":9967")
 	innerClient.SetLogger(logger)
+
+	ports, ok := innerClient.AvailablePorts()
+	if !ok || len(ports) != 12 {
+		t.Errorf("AvailablePorts")
+	}
+	port, ok := innerClient.AnyPort()
+	if !ok || port < 9900 || (port > 9910 && port != 9968) {
+		t.Errorf("AnyPort")
+	}
+
 	cancelFunc, done, err := innerClient.RegisterInnerService(
 		RegisterInfo{
 			OuterPort: 9968,
@@ -135,6 +147,11 @@ func TestBasicUsage(t *testing.T) {
 	case <-done:
 		t.Error("unexpected quit")
 	default:
+	}
+
+	services, err := innerClient.ActiveServices()
+	if err != nil || len(services) != 1 {
+		t.Error("ActiveServices")
 	}
 }
 
@@ -198,7 +215,7 @@ func TestCancel(t *testing.T) {
 	select {
 	case <-done:
 	default:
-		t.Error("unexpected quit")
+		t.Error("unexpected continue")
 	}
 	<-done
 }
@@ -272,7 +289,7 @@ func TestMultiplex(t *testing.T) {
 	time.Sleep(time.Millisecond * 100)
 	select {
 	case <-done:
-		t.Error("unexpected quit")
+		t.Error("unexpected continue")
 	default:
 
 	}
@@ -359,7 +376,7 @@ func TestMultiplexMaxTimeControl(t *testing.T) {
 	case <-done:
 		// must done
 	default:
-		t.Error("unexpected quit")
+		t.Error("unexpected continue")
 	}
 }
 
@@ -741,5 +758,161 @@ func TestHookContext(t *testing.T) {
 	case <-done:
 		t.Error("unexpected quit")
 	default:
+	}
+}
+
+func TestHookContextAbortUser(t *testing.T) {
+
+	logger := logrus.New()
+	logger.Level = logrus.FatalLevel
+
+	proxyServer := NewProxyLiteServer()
+	proxyServer.SetLogger(logger)
+	proxyServer.AddPort(9968, 9968)
+
+	cnt := 0
+
+	proxyServer.OnForwardTunnelToUser(func(ctx *Context) {
+		cnt++
+		if cnt == 2 {
+			ctx.AbortUser()
+		}
+	})
+
+	go func() {
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	innerClient := NewProxyLiteClient(":9967")
+	innerClient.SetLogger(logger)
+	cancelFunc, done, err := innerClient.RegisterInnerService(
+		RegisterInfo{
+			OuterPort: 9968,
+			InnerAddr: ":9966",
+			Name:      "Echo",
+			Message:   "TCP Echo Server",
+		},
+		ControlInfo{},
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		cancelFunc()
+		<-done
+		time.Sleep(time.Millisecond * 10) // wait close
+		proxyServer.Stop()
+		if cnt != 2 {
+			t.Error("hook does not work well")
+		}
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	user, err := net.Dial("tcp", ":9968")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := "hello123"
+	var data []byte
+	for i := 0; i < 10; i++ {
+		err := written(user, []byte(msg), 8)
+		if err != nil {
+			break
+		}
+		data, err = readn(user, 8)
+		if err != nil {
+			break
+		}
+		if string(data) != msg {
+			break
+		}
+	}
+	user.Close()
+	time.Sleep(time.Millisecond * 100)
+	select {
+	case <-done:
+		t.Error("unexpected quit")
+	default:
+	}
+}
+
+func TestHookContextAbortTunnel(t *testing.T) {
+
+	logger := logrus.New()
+	logger.Level = logrus.FatalLevel
+
+	proxyServer := NewProxyLiteServer()
+	proxyServer.SetLogger(logger)
+	proxyServer.AddPort(9968, 9968)
+
+	cnt := 0
+
+	proxyServer.OnForwardTunnelToUser(func(ctx *Context) {
+		cnt++
+		if cnt == 2 {
+			ctx.AbortTunnel()
+		}
+	})
+
+	go func() {
+		if err := proxyServer.Run(":9967"); err != nil {
+			panic(err)
+		}
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	innerClient := NewProxyLiteClient(":9967")
+	innerClient.SetLogger(logger)
+	cancelFunc, done, err := innerClient.RegisterInnerService(
+		RegisterInfo{
+			OuterPort: 9968,
+			InnerAddr: ":9966",
+			Name:      "Echo",
+			Message:   "TCP Echo Server",
+		},
+		ControlInfo{},
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		cancelFunc()
+		<-done
+		time.Sleep(time.Millisecond * 10) // wait close
+		proxyServer.Stop()
+		if cnt != 2 {
+			t.Error("hook does not work well")
+		}
+	}()
+	time.Sleep(time.Millisecond * 10)
+
+	user, err := net.Dial("tcp", ":9968")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := "hello123"
+	var data []byte
+	for i := 0; i < 10; i++ {
+		err := written(user, []byte(msg), 8)
+		if err != nil {
+			break
+		}
+		data, err = readn(user, 8)
+		if err != nil {
+			break
+		}
+		if string(data) != msg {
+			break
+		}
+	}
+	user.Close()
+	time.Sleep(time.Millisecond * 100)
+	select {
+	case <-done:
+	default:
+		t.Error("unexpected continue")
 	}
 }

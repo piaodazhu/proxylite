@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sort"
 	"sync"
@@ -126,7 +127,12 @@ func register(conn net.Conn, info RegisterInfo, ctrl ControlInfo) error {
 
 // SetLogger Set customized logrus logger for the inner client.
 func (c *ProxyLiteClient) SetLogger(logger *log.Logger) {
-	c.logger = logger
+	if logger == nil {
+		c.logger = log.New()
+		c.logger.SetOutput(io.Discard)
+	} else {
+		c.logger = logger
+	}
 }
 
 // RegisterInnerService Register inner server to proxy server's outer port.
