@@ -279,6 +279,7 @@ func (s *ProxyLiteServer) startTunnel(tn *tunnel) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", tn.service.Port))
 	if err != nil {
 		(*tn.innerConn).Close()
+		tn.empty = true
 		return
 	}
 
